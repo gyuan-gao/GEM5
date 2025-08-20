@@ -288,6 +288,19 @@ DynInst::dumpSNList()
 }
 #endif
 
+bool
+DynInst::isDependentOn(const DynInstPtr &other) const
+{
+    for (int i = 0; i < numSrcRegs(); i++) {
+        for (int j = 0; j < other->numDestRegs(); j++) {
+            if (srcRegIdx(i) == other->destRegIdx(j)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 void
 DynInst::dump()
 {

@@ -68,6 +68,10 @@ class ImmOp : public RiscvStaticInst
     ImmOp(const char *mnem, ExtMachInst _extMachInst, OpClass __opClass)
         : RiscvStaticInst(mnem, _extMachInst, __opClass), imm(0)
     {}
+
+    int64_t getImm() const override {
+        return imm;
+    }
 };
 
 /**

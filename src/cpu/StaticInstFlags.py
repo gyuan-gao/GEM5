@@ -54,6 +54,7 @@ class StaticInstFlags(Enum):
         'IsNop',            # Is a no-op (no effect at all).
         'IsMov',            # Move elimination
         'IsAddImm',         # Constant folding: addi and addi.w elimination
+        'IsFusion',         # Is a fusion instruction
 
         'IsInteger',        # References integer regs.
         'IsFloating',       # References FP regs.

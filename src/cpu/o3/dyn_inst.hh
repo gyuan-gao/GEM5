@@ -578,6 +578,8 @@ class DynInst : public ExecContext, public RefCounted
         renamedSrcIdx(idx, renamed_src);
     }
 
+    bool isDependentOn(const DynInstPtr &other) const;
+
     /** Dumps out contents of this BaseDynInst. */
     void dump();
 
