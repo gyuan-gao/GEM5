@@ -381,6 +381,8 @@ class StaticInst : public RefCounted, public StaticInstFlags
     /// Return name of machine instruction
     std::string getName() { return mnemonic; }
 
+    const char* getMnemonic() const { return mnemonic; }
+
   protected:
     template<typename T>
     size_t

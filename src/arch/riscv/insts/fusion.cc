@@ -82,7 +82,6 @@ ChainFusionInst::execute(ExecContext *xc, Trace::InstRecord *traceData) const
 StaticInstPtr chainFuseInsts(const char* name, const std::vector<o3::DynInstPtr> &vec, std::function<bool(const std::vector<o3::DynInstPtr>&)> checker)
 {
     if (!checker(vec)) {
-        panic("");
         return nullptr; // cannot fuse
     }
 
@@ -92,11 +91,69 @@ StaticInstPtr chainFuseInsts(const char* name, const std::vector<o3::DynInstPtr>
 #define FuseKey(t, n, i) FusionKey(typeid(RiscvISAInst::t), n, i)
 #define ChainCreator(n, ...) [](const std::vector<o3::DynInstPtr>& vec) { return chainFuseInsts(n, std::move(vec), [](const std::vector<o3::DynInstPtr>& vec) { return __VA_ARGS__ ;}); }
 
+#define FirstDest0EqualSecond(a, b) (a->destRegIdx(0) == b->destRegIdx(0))
+#define Dest0EqualSrc0(x) (x->destRegIdx(0) == x->srcRegIdx(0))
+
 const FusionTag fusionMap = {
-    // template
-    // {FuseKey(Add, 2, 0), new FusionTag{
-    //     {FuseKey(Add, 2, 0), ChainCreator("add4", vec[0]->destRegIdx(0) == vec[1]->destRegIdx(0))},
-    // }},
+    {FuseKey(Slli, 1, 32), new FusionTag{
+        {FuseKey(Srli, 1, 32), ChainCreator("low32", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Srli, 1, 31), ChainCreator("sll1zext", FirstDest0EqualSecond(vec[0], vec[1]) && vec[0]->srcRegIdx(0) == vec[1]->srcRegIdx(0) )},
+        {FuseKey(Srli, 1, 30), ChainCreator("sll2zext", FirstDest0EqualSecond(vec[0], vec[1]) && vec[0]->srcRegIdx(0) == vec[1]->srcRegIdx(0) )},
+        {FuseKey(Srli, 1, 29), ChainCreator("sll3zext", FirstDest0EqualSecond(vec[0], vec[1]) && vec[0]->srcRegIdx(0) == vec[1]->srcRegIdx(0) )},
+    }},
+    {FuseKey(Slli, 1, 48), new FusionTag{
+        {FuseKey(Srli, 1, 48), ChainCreator("low16", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Slliw, 1, 16), new FusionTag{
+        {FuseKey(Srliw, 1, 16), ChainCreator("low16w", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Sraiw, 1, 16), ChainCreator("sext16w", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Slli, 1, 1), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("sll1add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Slli, 1, 2), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("sll2add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Slli, 1, 3), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("sll3add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Slli, 1, 4), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("sll4add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Srli, 1, 29), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("srl29add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Srli, 1, 30), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("srl30add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Srli, 1, 31), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("srl31add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Srli, 1, 32), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("srl32add", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Srli, 1, 8), new FusionTag{
+        {FuseKey(Andi, 1, 255), ChainCreator("getsecondbyte", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Andi, 1, 1), new FusionTag{
+        {FuseKey(Add, 2, 0), ChainCreator("add1ifodd", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Addw, 2, 0), ChainCreator("add1ifoddw", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    {FuseKey(Addw, 2, 0), new FusionTag{
+        {FuseKey(Andi, 1, 255), ChainCreator("addwbyte", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Andi, 1, 1), ChainCreator("addwbit", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Zext_h, 1, 0), ChainCreator("addwzexth", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+        {FuseKey(Sext_h, 1, 0), ChainCreator("addwsexth", FirstDest0EqualSecond(vec[0], vec[1]) && Dest0EqualSrc0(vec[1]) )},
+    }},
+    // TODO: logic operation and extract its LSB
+    // TODO: logic operation and extract its lower 16 bits
+    // TODO: OR(Cat(src1(63, 8), 0.U(8.W)), src2)
+    // TODO: mul 7-bit data with 32-bit data
 };
+
+
+
+
+
 }
 }

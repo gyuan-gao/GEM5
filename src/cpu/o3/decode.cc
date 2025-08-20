@@ -92,6 +92,15 @@ Decode::Decode(CPU *_cpu, const BaseO3CPUParams &params)
     }
 
     decodeStalls.resize(decodeWidth, StallReason::NoStall);
+
+   statistics::registerDumpCallback([this]() {
+        int idx = 0;
+        for (auto it : this->fusionType) {
+            this->stats.fusedInsts.subname(idx, it.first);
+            this->stats.fusedInsts[idx] = it.second;
+            idx++;
+        }
+    });
 }
 
 void
@@ -144,6 +153,8 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
                "Number of times decode detected a branch misprediction"),
       ADD_STAT(numFusedInsts, statistics::units::Count::get(),
                "Number of fused instructions handled by decode"),
+      ADD_STAT(fusedInsts, statistics::units::Count::get(),
+               "Number of times decode fused instructions by type"),
       ADD_STAT(controlMispred, statistics::units::Count::get(),
                "Number of times decode detected an instruction incorrectly "
                "predicted as a control"),
@@ -168,6 +179,7 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
     squashedInsts.prereq(squashedInsts);
     mispredictedByPC.flags(statistics::total);
     mispredictedByNPC.flags(statistics::total);
+    fusedInsts.init(128).flags(statistics::nozero);
 }
 
 void
@@ -912,7 +924,6 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
         return;
     }
 
-
     // first search
     auto first = (StaticInst*)vec.back()->staticInst.get();
     assert(first);
@@ -957,6 +968,11 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
 
     cur = instruction;
     stats.numFusedInsts++;
+    if (fusionType.find(fused_inst->getMnemonic()) == fusionType.end()) {
+        fusionType[fused_inst->getMnemonic()] = 1;
+    } else {
+        fusionType[fused_inst->getMnemonic()]++;
+    }
 }
 
 void
