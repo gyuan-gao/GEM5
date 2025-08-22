@@ -926,16 +926,29 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
 
     // first search
     auto first = (StaticInst*)vec.back()->staticInst.get();
-    assert(first);
-    auto finder = RiscvISA::fusionMap.find(RiscvISA::FusionKey(typeid(*first), first->numSrcRegs(), first->getImm()));
+    std::type_index first_type = typeid(0);
+    auto it = RiscvISA::deCompressMap.find(typeid(*first));
+    if (it != RiscvISA::deCompressMap.end()) {
+        first_type = it->second;
+    } else {
+        first_type = typeid(*first);
+    }
+    auto finder = RiscvISA::fusionMap.find(RiscvISA::FusionKey(first_type, first->numSrcRegs(), first->getImm()));
     if (finder == RiscvISA::fusionMap.end()) return ; // no fusion
 
     // second search
     assert(finder->second.index() == 1);
 
     auto second = cur->staticInst.get();
+    std::type_index typeid_second = typeid(0);
+    auto it_second = RiscvISA::deCompressMap.find(typeid(*second));
+    if (it_second != RiscvISA::deCompressMap.end()) {
+        typeid_second = it_second->second;
+    } else {
+        typeid_second = typeid(*second);
+    }
     auto map = std::get<1>(finder->second);
-    finder = map->find(RiscvISA::FusionKey(typeid(*second), second->numSrcRegs(), second->getImm()));
+    finder = map->find(RiscvISA::FusionKey(typeid_second, second->numSrcRegs(), second->getImm()));
     if (finder == map->end()) return; // no fusion
 
     assert(finder->second.index() == 0);
@@ -968,6 +981,7 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
 
     cur = instruction;
     stats.numFusedInsts++;
+
     if (fusionType.find(fused_inst->getMnemonic()) == fusionType.end()) {
         fusionType[fused_inst->getMnemonic()] = 1;
     } else {

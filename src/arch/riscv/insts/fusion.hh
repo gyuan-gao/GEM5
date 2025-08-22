@@ -81,6 +81,7 @@ public:
         : std::unordered_map<FusionKey, FusionVal, FusionKey>(init) {}
 };
 
+extern const std::unordered_map<std::type_index, std::type_index> deCompressMap;
 extern const FusionTag fusionMap;
 
 }

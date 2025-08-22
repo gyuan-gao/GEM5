@@ -88,6 +88,20 @@ StaticInstPtr chainFuseInsts(const char* name, const std::vector<o3::DynInstPtr>
     return new ChainFusionInst(name, vec[1]->opClass(), vec[0], vec[1]);
 }
 
+const std::unordered_map<std::type_index, std::type_index> deCompressMap = {
+    {typeid(RiscvISAInst::C_slli), typeid(RiscvISAInst::Slli)},
+    {typeid(RiscvISAInst::C_srli), typeid(RiscvISAInst::Srli)},
+    {typeid(RiscvISAInst::C_addi), typeid(RiscvISAInst::Addi)},
+    {typeid(RiscvISAInst::C_addiw), typeid(RiscvISAInst::Addiw)},
+    {typeid(RiscvISAInst::C_add), typeid(RiscvISAInst::Add)},
+    {typeid(RiscvISAInst::C_addw), typeid(RiscvISAInst::Addw)},
+    {typeid(RiscvISAInst::C_and), typeid(RiscvISAInst::And)},
+    {typeid(RiscvISAInst::C_andi), typeid(RiscvISAInst::Andi)},
+    {typeid(RiscvISAInst::C_zext_h), typeid(RiscvISAInst::Zext_h)},
+    {typeid(RiscvISAInst::C_sext_h), typeid(RiscvISAInst::Sext_h)},
+};
+
+
 #define FuseKey(t, n, i) FusionKey(typeid(RiscvISAInst::t), n, i)
 #define ChainCreator(n, ...) [](const std::vector<o3::DynInstPtr>& vec) { return chainFuseInsts(n, std::move(vec), [](const std::vector<o3::DynInstPtr>& vec) { return __VA_ARGS__ ;}); }
 
