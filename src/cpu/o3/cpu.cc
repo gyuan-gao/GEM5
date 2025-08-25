@@ -1369,6 +1369,13 @@ CPU::instDone(ThreadID tid, const DynInstPtr &inst)
         cpuStats.committedInsts[tid]++;
         ipc_r++;
         cpi_r.roll(1);
+        if (inst->staticInst->isFusion()) {
+            thread[tid]->numInst++;
+            thread[tid]->threadStats.numInsts++;
+            cpuStats.committedInsts[tid]++;
+            ipc_r++;
+            cpi_r.roll(1);
+        }
 
         if (this->nextDumpInstCount
                 && totalInsts() == this->nextDumpInstCount) {
