@@ -920,7 +920,7 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
         return;
     }
 
-    if (vec.back()->faulted()) {
+    if (vec.back()->faulted() || cur->faulted()) {
         return;
     }
 
@@ -933,7 +933,7 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
     } else {
         first_type = typeid(*first);
     }
-    auto finder = RiscvISA::fusionMap.find(RiscvISA::FusionKey(first_type, first->numSrcRegs(), first->getImm()));
+    auto finder = RiscvISA::fusionMap.find(RiscvISA::FusionKey(first_type, first->getImm()));
     if (finder == RiscvISA::fusionMap.end()) return ; // no fusion
 
     // second search
@@ -948,7 +948,7 @@ Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
         typeid_second = typeid(*second);
     }
     auto map = std::get<1>(finder->second);
-    finder = map->find(RiscvISA::FusionKey(typeid_second, second->numSrcRegs(), second->getImm()));
+    finder = map->find(RiscvISA::FusionKey(typeid_second, second->getImm()));
     if (finder == map->end()) return; // no fusion
 
     assert(finder->second.index() == 0);

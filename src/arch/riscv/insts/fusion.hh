@@ -54,18 +54,20 @@ class ChainFusionInst : public FusionInst
 struct FusionKey
 {
     std::type_index type;
-    int numsrcs;
+    bool ignore_imm;
     int imm;
-    FusionKey() : type(typeid(void)), numsrcs(0), imm(0) {}
-    FusionKey(std::type_index t, int n, int i) : type(t), numsrcs(n), imm(i) {}
+    FusionKey() : type(typeid(void)), ignore_imm(true), imm(0) {}
+    FusionKey(std::type_index t) : type(t), ignore_imm(true), imm(0) {}
+    FusionKey(std::type_index t, int i) : type(t), ignore_imm(false), imm(i) {}
 
     // hash
     std::size_t operator()(const FusionKey& t) const {
-        return std::hash<std::type_index>()(t.type) ^ std::hash<int>()(t.numsrcs<<30) ^ std::hash<int>()(((int64_t)t.imm) << 32);
+        return (std::size_t)t.type.name();
     }
 
     bool operator==(const FusionKey& other) const {
-        return type == other.type && numsrcs == other.numsrcs && imm == other.imm;
+        // other is the key in map
+        return type == other.type && (imm == other.imm || other.ignore_imm);
     }
 };
 

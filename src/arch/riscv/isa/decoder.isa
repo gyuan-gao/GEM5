@@ -681,8 +681,8 @@ decode QUADRANT {
             }
         }
 
-        0x05: UOp::auipc({{
-            Rd = PC + (sext<20>(imm) << 12);
+        0x05: LUIOp::auipc({{
+            Rd = PC + imm;
         }});
 
         0x06: decode FUNCT3 {
@@ -1139,8 +1139,8 @@ decode QUADRANT {
             }
         }
 
-        0x0d: UOp::lui({{
-            Rd = (uint64_t)(sext<20>(imm) << 12);
+        0x0d: LUIOp::lui({{
+            Rd = (uint64_t)imm;
         }});
 
         0x0e: decode FUNCT3 {
