@@ -48,10 +48,6 @@ def template ImmDeclare {{
         Fault execute(ExecContext *, Trace::InstRecord *) const override;
         std::string generateDisassembly(Addr pc,
             const loader::SymbolTable *symtab) const override;
-
-        int64_t getImm() const override {
-            return imm;
-        }
     };
 }};
 
@@ -509,10 +505,10 @@ def format Jump(code, *opt_flags) {{
     exec_output = JumpExecute.subst(iop)
 }};
 
-def format UOp(code, *opt_flags) {{
+def format LUIOp(code, *opt_flags) {{
     regs = ['destRegIdx(0)']
     iop = InstObjParams(name, Name, 'ImmOp<int64_t>',
-        {'code': code, 'imm_code': 'imm = IMM20;',
+        {'code': code, 'imm_code': 'imm = (sext<20>(IMM20) << 12);',
          'regs': ','.join(regs)}, opt_flags)
     header_output = ImmDeclare.subst(iop)
     decoder_output = ImmConstructor.subst(iop)

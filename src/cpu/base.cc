@@ -918,6 +918,9 @@ BaseCPU::diffWithNEMU(ThreadID tid, InstSeqNum seq)
         // difftest step start
         DPRINTF(Diff, "Step NEMU\n");
         diffAllStates->proxy->exec(1);
+        if (diffInfo.inst->isFusion()) {
+            diffAllStates->proxy->exec(1); // execute the second part of the fusion
+        }
         diffAllStates->proxy->regcpy(diffAllStates->diff.nemu_reg, REF_TO_DIFFTEST);
 
         uint64_t next_pc = diffAllStates->diff.nemu_reg->pc;
@@ -1410,9 +1413,6 @@ BaseCPU::diffWithNEMU(ThreadID tid, InstSeqNum seq)
                             break;
                         }
                     }
-                    warn("Inst src count: %u, dest count: %u\n",
-                            diffInfo.inst->numSrcRegs(),
-                            diffInfo.inst->numDestRegs());
                     diffMsg << csprintf("Inst [sn:%lli] pc: %#lx\n", seq, diffInfo.pc->instAddr());
                     diffMsg << csprintf(
                         "Diff at \033[31m%s\033[0m Ref value: \033[31m%#lx\033[0m, "

@@ -149,6 +149,7 @@ class StaticInst : public RefCounted, public StaticInstFlags
 
     bool isNop()          const { return flags[IsNop]; }
     bool isMov()          const { return flags[IsMov]; }
+    bool isFusion()       const { return flags[IsFusion]; }
 
     bool
     isMemRef() const
@@ -379,6 +380,8 @@ class StaticInst : public RefCounted, public StaticInstFlags
 
     /// Return name of machine instruction
     std::string getName() { return mnemonic; }
+
+    const char* getMnemonic() const { return mnemonic; }
 
   protected:
     template<typename T>

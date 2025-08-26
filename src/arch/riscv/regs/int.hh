@@ -49,6 +49,7 @@
 #include <string>
 #include <vector>
 
+#include "arch/riscv/regs/renameable_misc.hh"
 #include "cpu/reg_class.hh"
 
 namespace gem5
@@ -134,6 +135,9 @@ inline constexpr auto
     &ReturnValueReg = int_reg::A0,
     &AMOTempReg = int_reg::Ureg0,
     &SyscallNumReg = int_reg::A7;
+
+// only used for fusion
+inline const auto FuseTmpReg = RegId(RMiscRegClass, rmisc_reg::_FuseTmp);
 
 inline constexpr RegId ArgumentRegs[] = {
     int_reg::A0, int_reg::A1, int_reg::A2, int_reg::A3,

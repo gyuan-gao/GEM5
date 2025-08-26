@@ -88,6 +88,10 @@ class RiscvStaticInst : public StaticInst
     {
         return simpleAsBytes(buf, size, machInst);
     }
+
+    virtual int64_t getImm() const override {
+        return 0;
+    }
 };
 
 /**

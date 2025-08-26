@@ -37,21 +37,22 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-#include <queue>
-
 #include "cpu/o3/decode.hh"
 
+#include <queue>
+
 #include "arch/generic/pcstate.hh"
+#include "arch/riscv/insts/fusion.hh"
 #include "base/trace.hh"
 #include "config/the_isa.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/o3/dyn_inst.hh"
 #include "cpu/o3/limits.hh"
 #include "debug/Activity.hh"
+#include "debug/Counters.hh"
 #include "debug/Decode.hh"
 #include "debug/DecoupleBP.hh"
 #include "debug/O3PipeView.hh"
-#include "debug/Counters.hh"
 #include "params/BaseO3CPU.hh"
 #include "sim/full_system.hh"
 
@@ -91,6 +92,15 @@ Decode::Decode(CPU *_cpu, const BaseO3CPUParams &params)
     }
 
     decodeStalls.resize(decodeWidth, StallReason::NoStall);
+
+   statistics::registerDumpCallback([this]() {
+        int idx = 0;
+        for (auto it : this->fusionType) {
+            this->stats.fusedInsts.subname(idx, it.first);
+            this->stats.fusedInsts[idx] = it.second;
+            idx++;
+        }
+    });
 }
 
 void
@@ -141,6 +151,10 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
                "Number of times decode resolved a branch"),
       ADD_STAT(branchMispred, statistics::units::Count::get(),
                "Number of times decode detected a branch misprediction"),
+      ADD_STAT(numFusedInsts, statistics::units::Count::get(),
+               "Number of fused instructions handled by decode"),
+      ADD_STAT(fusedInsts, statistics::units::Count::get(),
+               "Number of times decode fused instructions by type"),
       ADD_STAT(controlMispred, statistics::units::Count::get(),
                "Number of times decode detected an instruction incorrectly "
                "predicted as a control"),
@@ -165,6 +179,7 @@ Decode::DecodeStats::DecodeStats(CPU *cpu)
     squashedInsts.prereq(squashedInsts);
     mispredictedByPC.flags(statistics::total);
     mispredictedByNPC.flags(statistics::total);
+    fusedInsts.init(128).flags(statistics::nozero);
 }
 
 void
@@ -728,6 +743,7 @@ Decode::decodeInsts(ThreadID tid)
         vec_decode_limit = true;
     }
 
+    std::vector<DynInstPtr> fusionInst;
     while (insts_available > 0 && toRenameIndex < decodeWidth) {
         assert(!insts_to_decode.empty());
         if (vec_decode_limit && insts_to_decode.front()->isVector()) {
@@ -766,9 +782,9 @@ Decode::decodeInsts(ThreadID tid)
         // This current instruction is valid, so add it into the decode
         // queue.  The next instruction may not be valid, so check to
         // see if branches were predicted correctly.
-        toRename->insts[toRenameIndex] = inst;
+        checkAndFuseInsts(fusionInst, inst);
+        fusionInst.push_back(inst);
 
-        ++(toRename->size);
         ++toRenameIndex;
         ++stats.decodedInsts;
         --insts_available;
@@ -871,6 +887,10 @@ Decode::decodeInsts(ThreadID tid)
         }
     }
 
+    for (auto &fused_inst : fusionInst) {
+        toRename->insts[toRename->size++] = fused_inst;
+    }
+
     // this stage is totally stalled, set all decode stalls
     if (!decode_stalls.empty()) {
         setAllStalls(decode_stalls.front());
@@ -890,6 +910,82 @@ Decode::decodeInsts(ThreadID tid)
     // tracking.
     if (toRenameIndex) {
         wroteToTimeBuffer = true;
+    }
+}
+
+void
+Decode::checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur)
+{
+    if (vec.empty()) {
+        return;
+    }
+
+    if (vec.back()->faulted() || cur->faulted()) {
+        return;
+    }
+
+    // first search
+    auto first = (StaticInst*)vec.back()->staticInst.get();
+    std::type_index first_type = typeid(0);
+    auto it = RiscvISA::deCompressMap.find(typeid(*first));
+    if (it != RiscvISA::deCompressMap.end()) {
+        first_type = it->second;
+    } else {
+        first_type = typeid(*first);
+    }
+    auto finder = RiscvISA::fusionMap.find(RiscvISA::FusionKey(first_type, first->getImm()));
+    if (finder == RiscvISA::fusionMap.end()) return ; // no fusion
+
+    // second search
+    assert(finder->second.index() == 1);
+
+    auto second = cur->staticInst.get();
+    std::type_index typeid_second = typeid(0);
+    auto it_second = RiscvISA::deCompressMap.find(typeid(*second));
+    if (it_second != RiscvISA::deCompressMap.end()) {
+        typeid_second = it_second->second;
+    } else {
+        typeid_second = typeid(*second);
+    }
+    auto map = std::get<1>(finder->second);
+    finder = map->find(RiscvISA::FusionKey(typeid_second, second->getImm()));
+    if (finder == map->end()) return; // no fusion
+
+    assert(finder->second.index() == 0);
+    auto creator = std::get<0>(finder->second);
+
+    const std::vector<DynInstPtr> inst_pair = {vec.back(), cur};
+    auto fused_inst = creator(inst_pair);
+    if (!fused_inst) return;
+    vec.pop_back();
+
+    DynInst::Arrays arrays;
+    arrays.numSrcs = fused_inst->numSrcRegs();
+    arrays.numDests = fused_inst->numDestRegs();
+
+    // Create a new DynInst from the instruction fetched.
+    DynInstPtr instruction = new (arrays) DynInst(
+            arrays, fused_inst, fused_inst, *inst_pair[0]->pcState().clone(), *inst_pair[0]->predPC->clone(), inst_pair[0]->seqNum, cpu);
+
+    instruction->setVersion(inst_pair[0]->getVersion());
+    instruction->setTid(inst_pair[0]->threadNumber);
+    instruction->thread = inst_pair[0]->thread;
+    instruction->setFsqId(inst_pair[0]->fsqId);
+    instruction->setFtqId(inst_pair[0]->ftqId);
+
+    instruction->instListIt = cpu->instList.insert(inst_pair[0]->instListIt, instruction);
+    cpu->instList.erase(inst_pair[0]->instListIt);
+    cpu->instList.erase(inst_pair[1]->instListIt);
+
+    dynamic_cast<RiscvISA::FusionInst*>(fused_inst.get())->setFusedInst(instruction);
+
+    cur = instruction;
+    stats.numFusedInsts++;
+
+    if (fusionType.find(fused_inst->getMnemonic()) == fusionType.end()) {
+        fusionType[fused_inst->getMnemonic()] = 1;
+    } else {
+        fusionType[fused_inst->getMnemonic()]++;
     }
 }
 

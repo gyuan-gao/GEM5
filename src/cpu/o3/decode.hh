@@ -152,6 +152,9 @@ class Decode
     void decodeInsts(ThreadID tid);
 
   private:
+
+    void checkAndFuseInsts(std::vector<DynInstPtr> &vec, DynInstPtr& cur);
+
     /** Inserts a thread's instructions into the skid buffer, to be decoded
      * once decode unblocks.
      */
@@ -321,6 +324,9 @@ class Decode
         statistics::Scalar branchResolved;
         /** Stat for number of times a branch mispredict is detected. */
         statistics::Scalar branchMispred;
+
+        statistics::Scalar numFusedInsts;
+        statistics::Vector fusedInsts;
         /** Stat for number of times decode detected a non-control instruction
          * incorrectly predicted as a branch.
          */
@@ -336,6 +342,8 @@ class Decode
     } stats;
 
     std::vector<StallReason> decodeStalls;
+
+    std::unordered_map<const char*, uint64_t> fusionType;
 
     StallReason blockReason;
 
