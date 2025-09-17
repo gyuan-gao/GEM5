@@ -151,9 +151,9 @@ XSStridePrefetcher::strideLookup(AssociativeSet<StrideEntry> &stride, const Pref
             unsigned start_depth = pfi.isCacheMiss() ? std::max(1, (entry->depth - 4)) : entry->depth;
             Addr pf_addr = 0;
             if (useXsDepth) {
-                sendPFWithFilter(pfi, blockAddress(lookupAddr + entry->stride * 2), addresses, 0,
+                sendPFWithFilter(pfi, blockAddress(lookupAddr + (entry->stride << 2)), addresses, 0,
                                  PrefetchSourceType::SStride, 1);
-                sendPFWithFilter(pfi, blockAddress(lookupAddr + entry->stride * 5), addresses, 0,
+                sendPFWithFilter(pfi, blockAddress(lookupAddr + (entry->stride << 5)), addresses, 0,
                                  PrefetchSourceType::SStride, 2);
             } else {
                 for (unsigned i = start_depth; i <= entry->depth; i++) {
@@ -239,17 +239,24 @@ void
 XSStridePrefetcher::sendPFWithFilter(const PrefetchInfo &pfi, Addr addr, std::vector<AddrPriority> &addresses,
                                       int prio, PrefetchSourceType src, int ahead_level)
 {
-    if (filter->contains(addr)) {
-        DPRINTF(XSStridePrefetcher, "Skip recently prefetched: %lx\n", addr);
-    } else {
-        DPRINTF(XSStridePrefetcher, "Send pf: %lx\n", addr);
-        filter->insert(addr, 0);
-        addresses.push_back(AddrPriority(addr, prio, src));
-        if (ahead_level > 1) {
+    if (ahead_level > 1){
+        if (filterL2->contains(addr)) {
+            DPRINTF(XSStridePrefetcher, "Skip recently prefetched: %lx\n", addr);
+        } else {
+            DPRINTF(XSStridePrefetcher, "Send pf: %lx\n", addr);
+            filterL2->insert(addr, 0);
+            addresses.push_back(AddrPriority(addr, prio, src));
             assert(ahead_level == 2 || ahead_level == 3);
             addresses.back().pfahead_host = ahead_level;
             addresses.back().pfahead = true;
+        }
+    } else {
+        if (filter->contains(addr)) {
+            DPRINTF(XSStridePrefetcher, "Skip recently prefetched: %lx\n", addr);
         } else {
+            DPRINTF(XSStridePrefetcher, "Send pf: %lx\n", addr);
+            filter->insert(addr, 0);
+            addresses.push_back(AddrPriority(addr, prio, src));
             addresses.back().pfahead = false;
         }
     }
