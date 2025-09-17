@@ -442,6 +442,14 @@ if __name__ == '__m5_main__':
 
     assert not args.external_memory_system
 
+    # Set default bp_type based on ideal_kmhv3 flag
+    # If user didn't specify bp_type, set default based on ideal_kmhv3
+    if args.bp_type is None:
+        if args.ideal_kmhv3:
+            args.bp_type = 'DecoupledBPUWithBTB'
+        else:
+            args.bp_type = 'DecoupledBPUWithFTB'
+
     # Match the memories with the CPUs, based on the options for the test system
     TestMemClass = Simulation.setMemClass(args)
 
