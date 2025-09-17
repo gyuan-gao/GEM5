@@ -111,7 +111,7 @@ class BTBTAGE : public TimedBaseBTBPredictor
     struct AllocationResult {
         bool allocate_valid;             // Whether allocation is valid
         bitset allocate_mask;            // Mask for allocation
-        
+
         AllocationResult() : allocate_valid(false) {}
     };
 
@@ -189,7 +189,7 @@ class BTBTAGE : public TimedBaseBTBPredictor
     }
 
     // Update branch history
-    void doUpdateHist(const bitset &history, bool taken, Addr pc);
+    void doUpdateHist(const bitset &history, bool taken, Addr pc, Addr target);
 
     // Number of TAGE predictor tables
     const unsigned numPredictors;
@@ -331,7 +331,7 @@ class BTBTAGE : public TimedBaseBTBPredictor
 #endif
         void updateStatsWithTagePrediction(const TagePrediction &pred, bool when_pred);
     } ;
-    
+
     TageStats tageStats;
 
 #ifndef UNIT_TEST
@@ -386,7 +386,7 @@ private:
     std::vector<BTBEntry> prepareUpdateEntries(const FetchStream &stream);
 
     // Helper method to update predictor state for a single entry
-    bool updatePredictorStateAndCheckAllocation(const BTBEntry &entry, 
+    bool updatePredictorStateAndCheckAllocation(const BTBEntry &entry,
                                  bool actual_taken,
                                  const TagePrediction &pred,
                                  const FetchStream &stream);
