@@ -1486,122 +1486,15 @@ bool
 Fetch::handleCommitSignals(ThreadID tid)
 {
     // Check squash signals from commit.
-    if (fromCommit->commitInfo[tid].squash) {
-
-        DPRINTF(Fetch, "[tid:%i] Squashing instructions due to squash "
-                "from commit.\n",tid);
-        // In any case, squash.
-        squash(*fromCommit->commitInfo[tid].pc,
-               fromCommit->commitInfo[tid].doneSeqNum,
-               fromCommit->commitInfo[tid].squashInst, tid);
-
-        localSquashVer.update(fromCommit->commitInfo[tid].squashVersion.getVersion());
-        DPRINTF(Fetch, "Updating squash version to %u\n",
-                localSquashVer.getVersion());
-
-        // If it was a branch mispredict on a control instruction, update the
-        // branch predictor with that instruction, otherwise just kill the
-        // invalid state we generated in after sequence number
-        if (!isDecoupledFrontend()) {
-            if (fromCommit->commitInfo[tid].mispredictInst &&
-                fromCommit->commitInfo[tid].mispredictInst->isControl()) {
-                branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
-                        *fromCommit->commitInfo[tid].pc,
-                        fromCommit->commitInfo[tid].branchTaken, tid);
-            } else {
-                branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum,
-                                tid);
+    if (!fromCommit->commitInfo[tid].squash) {
+        if (fromCommit->commitInfo[tid].doneSeqNum) {
+            // Update the branch predictor if it wasn't a squashed instruction
+            // that was broadcasted.
+            if (!isDecoupledFrontend()) {
+                branchPred->update(fromCommit->commitInfo[tid].doneSeqNum, tid);
+                return false;
             }
-        } else {
-            auto mispred_inst = fromCommit->commitInfo[tid].mispredictInst;
-            // TODO: write dbpftb conditions
-            if (mispred_inst) {
-                DPRINTF(Fetch, "Use mispred inst to redirect, treating as control squash\n");
-                if (isStreamPred()) {
-                    dbsp->controlSquash(
-                        mispred_inst->getFtqId(), mispred_inst->getFsqId(),
-                        mispred_inst->pcState(), *fromCommit->commitInfo[tid].pc,
-                        mispred_inst->staticInst, mispred_inst->getInstBytes(),
-                        fromCommit->commitInfo[tid].branchTaken,
-                        mispred_inst->seqNum, tid);
-                } else if (isFTBPred()) {
-                    dbpftb->controlSquash(
-                        mispred_inst->getFtqId(), mispred_inst->getFsqId(),
-                        mispred_inst->pcState(), *fromCommit->commitInfo[tid].pc,
-                        mispred_inst->staticInst, mispred_inst->getInstBytes(),
-                        fromCommit->commitInfo[tid].branchTaken,
-                        mispred_inst->seqNum, tid, mispred_inst->getLoopIteration(),
-                        true);
-                } else if (isBTBPred()) {
-                    dbpbtb->controlSquash(
-                        mispred_inst->getFtqId(), mispred_inst->getFsqId(),
-                        mispred_inst->pcState(), *fromCommit->commitInfo[tid].pc,
-                        mispred_inst->staticInst, mispred_inst->getInstBytes(),
-                        fromCommit->commitInfo[tid].branchTaken,
-                        mispred_inst->seqNum, tid, mispred_inst->getLoopIteration(),
-                        true);
-                }
-            } else if (fromCommit->commitInfo[tid].isTrapSquash) {
-                DPRINTF(Fetch, "Treating as trap squash\n",tid);
-                if (isStreamPred()) {
-                    dbsp->trapSquash(
-                        fromCommit->commitInfo[tid].squashedTargetId,
-                        fromCommit->commitInfo[tid].squashedStreamId,
-                        fromCommit->commitInfo[tid].committedPC,
-                        *fromCommit->commitInfo[tid].pc, tid);
-                } else if (isFTBPred()) {
-                    dbpftb->trapSquash(
-                        fromCommit->commitInfo[tid].squashedTargetId,
-                        fromCommit->commitInfo[tid].squashedStreamId,
-                        fromCommit->commitInfo[tid].committedPC,
-                        *fromCommit->commitInfo[tid].pc, tid, fromCommit->commitInfo[tid].squashedLoopIter);
-                } else if (isBTBPred()) {
-                    dbpbtb->trapSquash(
-                        fromCommit->commitInfo[tid].squashedTargetId,
-                        fromCommit->commitInfo[tid].squashedStreamId,
-                        fromCommit->commitInfo[tid].committedPC,
-                        *fromCommit->commitInfo[tid].pc, tid, fromCommit->commitInfo[tid].squashedLoopIter);
-                }
-
-
-            } else {
-                if (fromCommit->commitInfo[tid].pc &&
-                    fromCommit->commitInfo[tid].squashedStreamId != 0) {
-                    DPRINTF(Fetch,
-                            "Squash with stream id and target id from IEW\n");
-                    if (isStreamPred()) {
-                        dbsp->nonControlSquash(
-                            fromCommit->commitInfo[tid].squashedTargetId,
-                            fromCommit->commitInfo[tid].squashedStreamId,
-                            *fromCommit->commitInfo[tid].pc, 0, tid);
-                    } else if (isFTBPred()) {
-                        dbpftb->nonControlSquash(
-                            fromCommit->commitInfo[tid].squashedTargetId,
-                            fromCommit->commitInfo[tid].squashedStreamId,
-                            *fromCommit->commitInfo[tid].pc, 0, tid, fromCommit->commitInfo[tid].squashedLoopIter);
-                    } else if (isBTBPred()) {
-                        dbpbtb->nonControlSquash(
-                            fromCommit->commitInfo[tid].squashedTargetId,
-                            fromCommit->commitInfo[tid].squashedStreamId,
-                            *fromCommit->commitInfo[tid].pc, 0, tid, fromCommit->commitInfo[tid].squashedLoopIter);
-                    }
-                } else {
-                    DPRINTF(
-                        Fetch,
-                        "Dont squash dbq because no meaningful stream\n");
-                }
-            }
-        }
-
-        return true;
-    } else if (fromCommit->commitInfo[tid].doneSeqNum) {
-        // Update the branch predictor if it wasn't a squashed instruction
-        // that was broadcasted.
-        if (!isDecoupledFrontend()) {
-            branchPred->update(fromCommit->commitInfo[tid].doneSeqNum, tid);
-        } else {
-            DPRINTF(DecoupleBP, "Commit stream Id: %lu\n",
-                    fromCommit->commitInfo[tid].doneFsqId);
+            DPRINTF(DecoupleBP, "Commit stream Id: %lu\n", fromCommit->commitInfo[tid].doneFsqId);
             if (isStreamPred()) {
                 assert(dbsp);
                 dbsp->update(fromCommit->commitInfo[tid].doneFsqId, tid);
@@ -1613,9 +1506,91 @@ Fetch::handleCommitSignals(ThreadID tid)
                 dbpbtb->update(fromCommit->commitInfo[tid].doneFsqId, tid);
             }
         }
+        return false;
     }
 
-    return false;
+    // Check squash signals from commit.
+    DPRINTF(Fetch,
+            "[tid:%i] Squashing instructions due to squash "
+            "from commit.\n",
+            tid);
+    // In any case, squash.
+    squash(*fromCommit->commitInfo[tid].pc, fromCommit->commitInfo[tid].doneSeqNum,
+           fromCommit->commitInfo[tid].squashInst, tid);
+
+    localSquashVer.update(fromCommit->commitInfo[tid].squashVersion.getVersion());
+    DPRINTF(Fetch, "Updating squash version to %u\n", localSquashVer.getVersion());
+
+    // If it was a branch mispredict on a control instruction, update the
+    // branch predictor with that instruction, otherwise just kill the
+    // invalid state we generated in after sequence number
+    if (!isDecoupledFrontend()) {
+        if (fromCommit->commitInfo[tid].mispredictInst && fromCommit->commitInfo[tid].mispredictInst->isControl()) {
+            branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum, *fromCommit->commitInfo[tid].pc,
+                               fromCommit->commitInfo[tid].branchTaken, tid);
+        } else {
+            branchPred->squash(fromCommit->commitInfo[tid].doneSeqNum, tid);
+        }
+        return true;
+    }
+
+    auto mispred_inst = fromCommit->commitInfo[tid].mispredictInst;
+    // TODO: write dbpftb conditions
+    if (mispred_inst) {
+        DPRINTF(Fetch, "Use mispred inst to redirect, treating as control squash\n");
+        if (isStreamPred()) {
+            dbsp->controlSquash(mispred_inst->getFtqId(), mispred_inst->getFsqId(), mispred_inst->pcState(),
+                                *fromCommit->commitInfo[tid].pc, mispred_inst->staticInst,
+                                mispred_inst->getInstBytes(), fromCommit->commitInfo[tid].branchTaken,
+                                mispred_inst->seqNum, tid);
+        } else if (isFTBPred()) {
+            dbpftb->controlSquash(mispred_inst->getFtqId(), mispred_inst->getFsqId(), mispred_inst->pcState(),
+                                  *fromCommit->commitInfo[tid].pc, mispred_inst->staticInst,
+                                  mispred_inst->getInstBytes(), fromCommit->commitInfo[tid].branchTaken,
+                                  mispred_inst->seqNum, tid, mispred_inst->getLoopIteration(), true);
+        } else if (isBTBPred()) {
+            dbpbtb->controlSquash(mispred_inst->getFtqId(), mispred_inst->getFsqId(), mispred_inst->pcState(),
+                                  *fromCommit->commitInfo[tid].pc, mispred_inst->staticInst,
+                                  mispred_inst->getInstBytes(), fromCommit->commitInfo[tid].branchTaken,
+                                  mispred_inst->seqNum, tid, mispred_inst->getLoopIteration(), true);
+        }
+    } else if (fromCommit->commitInfo[tid].isTrapSquash) {
+        DPRINTF(Fetch, "Treating as trap squash\n", tid);
+        if (isStreamPred()) {
+            dbsp->trapSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                             fromCommit->commitInfo[tid].squashedStreamId, fromCommit->commitInfo[tid].committedPC,
+                             *fromCommit->commitInfo[tid].pc, tid);
+        } else if (isFTBPred()) {
+            dbpftb->trapSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                               fromCommit->commitInfo[tid].squashedStreamId, fromCommit->commitInfo[tid].committedPC,
+                               *fromCommit->commitInfo[tid].pc, tid, fromCommit->commitInfo[tid].squashedLoopIter);
+        } else if (isBTBPred()) {
+            dbpbtb->trapSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                               fromCommit->commitInfo[tid].squashedStreamId, fromCommit->commitInfo[tid].committedPC,
+                               *fromCommit->commitInfo[tid].pc, tid, fromCommit->commitInfo[tid].squashedLoopIter);
+        }
+    } else {
+        if (fromCommit->commitInfo[tid].pc && fromCommit->commitInfo[tid].squashedStreamId != 0) {
+            DPRINTF(Fetch, "Squash with stream id and target id from IEW\n");
+            if (isStreamPred()) {
+                dbsp->nonControlSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                                       fromCommit->commitInfo[tid].squashedStreamId, *fromCommit->commitInfo[tid].pc,
+                                       0, tid);
+            } else if (isFTBPred()) {
+                dbpftb->nonControlSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                                         fromCommit->commitInfo[tid].squashedStreamId, *fromCommit->commitInfo[tid].pc,
+                                         0, tid, fromCommit->commitInfo[tid].squashedLoopIter);
+            } else if (isBTBPred()) {
+                dbpbtb->nonControlSquash(fromCommit->commitInfo[tid].squashedTargetId,
+                                         fromCommit->commitInfo[tid].squashedStreamId, *fromCommit->commitInfo[tid].pc,
+                                         0, tid, fromCommit->commitInfo[tid].squashedLoopIter);
+            }
+        } else {
+            DPRINTF(Fetch, "Dont squash dbq because no meaningful stream\n");
+        }
+    }
+
+    return true;
 }
 
 bool
