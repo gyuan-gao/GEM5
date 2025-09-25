@@ -135,6 +135,29 @@ class BasePrefetcher(ClockedObject):
         self._downstream_pf.append(other_prefetcher)
 
 
+class PrefetcherForwarder(BasePrefetcher):
+    type = 'PrefetcherForwarder'
+    cxx_header = "mem/cache/prefetch/forwarder.hh"
+    cxx_class = 'gem5::prefetch::PrefetcherForwarder'
+    cxx_exports = [
+        PyBindMethod("setRealPrefetcher")
+    ]
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._real_pf = None
+
+    def regProbeListeners(self):
+        if self._real_pf is None:
+            print(f"real_pf of PrefetcherForwarder is None")
+        else:
+            self.getCCObject().setRealPrefetcher(self._real_pf.getCCObject())
+        super().regProbeListeners()
+
+    def setRealPrefetcher(self, real_pf):
+        self._real_pf = real_pf
+
+
 class QueuedPrefetcher(BasePrefetcher):
     type = "QueuedPrefetcher"
     abstract = True

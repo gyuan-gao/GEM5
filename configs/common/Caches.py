@@ -112,7 +112,9 @@ class L2Cache(Cache):
 
     cache_level = 2
 
-    slice_num = 4
+    # NOTE: slice stall is implemented in L2CacheWrapper now,
+    #       so this parameter has no effect in L2Cache.
+    # slice_num = 4
 
 class L3Cache(Cache):
     mshrs = 64

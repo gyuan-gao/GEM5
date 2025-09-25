@@ -156,6 +156,9 @@ def addNoISAOptions(parser, configure_xiangshan=False):
 
     parser.add_argument("--l2_size", type=str, default="1MB")
     parser.add_argument("--l2_assoc", type=int, default=8)
+    parser.add_argument("--l2_slices", type=int, default=4)
+    parser.add_argument("--classic-l2", action="store_true", default=False,
+                        help="use classic L2 cache, instead of RTL aligned L2 cache")
 
     parser.add_argument("--l3_size", type=str, default="16MB")
     parser.add_argument("--l3_assoc", type=int, default=16)
@@ -169,8 +172,10 @@ def addNoISAOptions(parser, configure_xiangshan=False):
                         choices=ObjectList.hwp_list.get_names(), help="L1 icache hardware prefetcher")
     parser.add_argument("--l1d-hwp-type", default='XSCompositePrefetcher',
                         choices=ObjectList.hwp_list.get_names(), help="L1 dcache hardware prefetcher")
-    parser.add_argument("--l2-hwp-type", default='L2CompositeWithWorkerPrefetcher',
+    parser.add_argument("--l2-hwp-type", default='PrefetcherForwarder',
                         choices=ObjectList.hwp_list.get_names(), help="L2 cache hardware prefetcher")
+    parser.add_argument("--l2-wrapper-hwp-type", default='L2CompositeWithWorkerPrefetcher',
+                        choices=ObjectList.hwp_list.get_names(), help="L2 wrapper cache hardware prefetcher")
     parser.add_argument("--l3-hwp-type", default='WorkerPrefetcher',
                         choices=ObjectList.hwp_list.get_names(), help="L3 cache hardware prefetcher")
 
