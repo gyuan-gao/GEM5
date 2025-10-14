@@ -1043,7 +1043,7 @@ class BTBTAGE(TimedBaseBTBPredictor):
     TTagPcShifts = VectorParam.Unsigned([1] * 4, "when the T0~Tn entry's tag generating, PC right shift")
     blockSize = 32 # tage index function uses 32B aligned block address
 
-    histLengths = VectorParam.Unsigned([8, 13, 32, 119], "the FTB TAGE T0~Tn history length")
+    histLengths = VectorParam.Unsigned([8, 13, 32, 119], "the BTB TAGE T0~Tn history length")
     maxHistLen = Param.Unsigned(970, "The length of history passed from DBP")
     numTablesToAlloc = Param.Unsigned(1,"The number of table to allocated each time")
     numWays = Param.Unsigned(2, "Number of ways per set")
@@ -1052,6 +1052,20 @@ class BTBTAGE(TimedBaseBTBPredictor):
     useAltOnNaSize = Param.Unsigned(128, "Size of the useAltOnNa table")
     useAltOnNaWidth = Param.Unsigned(7, "Width of the useAltOnNa table")
     numDelay = 2
+
+class MicroTAGE(BTBTAGE):
+    """A smaller TAGE predictor configuration to assist uBTB"""
+    enableSC = Param.Bool(False, "Enable SC or not")    # TODO: BTBTAGE doesn't support SC
+    numPredictors = Param.Unsigned(1, "Number of TAGE predictors")
+    tableSizes = VectorParam.Unsigned([512]*1, "the ITTAGE T0~Tn length")
+    TTagBitSizes = VectorParam.Unsigned([6]*1, "the T0~Tn entry's tag bit size")
+    TTagPcShifts = VectorParam.Unsigned([1]*1, "when the T0~Tn entry's tag generating, PC right shift")
+
+    histLengths = VectorParam.Unsigned([16], "the FTB TAGE T0~Tn history length")
+    maxHistLen = Param.Unsigned(970, "The length of history passed from DBP")
+    numTablesToAlloc = Param.Unsigned(1,"The number of table to allocated each time")
+    numWays = Param.Unsigned(2, "Number of ways per set")
+    numDelay = 0
 
 class BTBITTAGE(TimedBaseBTBPredictor):
     type = 'BTBITTAGE'
@@ -1154,6 +1168,7 @@ class DecoupledBPUWithBTB(BranchPredictor):
     numStages = Param.Unsigned(4, "Maximum number of stages in the pipeline")
     ubtb = Param.UBTB(UBTB(), "UBTB predictor")
     abtb = Param.AheadBTB(AheadBTB(), "ABTB predictor")
+    microtage = Param.BTBTAGE(MicroTAGE(), "MicroTAGE predictor to assist uBTB")
     btb = Param.MBTB(MBTB(), "MBTB predictor")
     tage = Param.BTBTAGE(BTBTAGE(), "TAGE predictor")
     ittage = Param.BTBITTAGE(BTBITTAGE(), "ITTAGE predictor")
