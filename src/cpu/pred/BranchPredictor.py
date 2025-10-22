@@ -982,6 +982,7 @@ class MBTB(TimedBaseBTBPredictor):
     numDelay = 2
     blockSize = 32  # max 64 byte block, 32 byte aligned
     # MBTB is always half-aligned - no parameter needed
+    victimCacheSize = Param.Unsigned(16, "Number of entries in the victim cache")
 
 class AheadBTB(TimedBaseBTBPredictor):
     type = 'AheadBTB'
@@ -1056,15 +1057,12 @@ class BTBTAGE(TimedBaseBTBPredictor):
 class MicroTAGE(BTBTAGE):
     """A smaller TAGE predictor configuration to assist uBTB"""
     enableSC = Param.Bool(False, "Enable SC or not")    # TODO: BTBTAGE doesn't support SC
-    numPredictors = Param.Unsigned(1, "Number of TAGE predictors")
-    tableSizes = VectorParam.Unsigned([512]*1, "the ITTAGE T0~Tn length")
-    TTagBitSizes = VectorParam.Unsigned([6]*1, "the T0~Tn entry's tag bit size")
-    TTagPcShifts = VectorParam.Unsigned([1]*1, "when the T0~Tn entry's tag generating, PC right shift")
+    numPredictors = 1
+    tableSizes = [512]
+    TTagBitSizes = [16]
+    TTagPcShifts = [1]
 
-    histLengths = VectorParam.Unsigned([16], "the FTB TAGE T0~Tn history length")
-    maxHistLen = Param.Unsigned(970, "The length of history passed from DBP")
-    numTablesToAlloc = Param.Unsigned(1,"The number of table to allocated each time")
-    numWays = Param.Unsigned(2, "Number of ways per set")
+    histLengths = [16]
     numDelay = 0
 
 class BTBITTAGE(TimedBaseBTBPredictor):
