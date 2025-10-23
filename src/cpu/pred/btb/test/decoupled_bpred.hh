@@ -129,7 +129,7 @@ class DecoupledBPUWithBTB
 
     bool validateFSQEnqueue();
 
-    void makeNewPrediction(bool create_new_stream);
+    void processNewPrediction(bool create_new_stream);
 
     FtqEntry createFtqEntryFromStream(const FetchStream &stream, const FetchTargetEnqState &ftq_enq_state);
 

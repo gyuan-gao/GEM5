@@ -597,7 +597,7 @@ DecoupledBPUWithBTB::tick()
     // 3. PREDICTION_OUTSTANDING
     if (validateFSQEnqueue()) {
         // Create new FSQ entry with the current prediction
-        makeNewPrediction(true);
+        processNewPrediction(true);
 
         DPRINTF(Override, "FSQ entry enqueued, prediction state reset\n");
         bpuState = BpuState::IDLE;
@@ -1826,7 +1826,7 @@ DecoupledBPUWithBTB::fillAheadPipeline(FetchStream &entry)
 
 // this function enqueues fsq and update s0PC and s0History
 void
-DecoupledBPUWithBTB::makeNewPrediction(bool create_new_stream)
+DecoupledBPUWithBTB::processNewPrediction(bool create_new_stream)
 {
     DPRINTF(DecoupleBP, "Creating new prediction for PC %#lx\n", s0PC);
 

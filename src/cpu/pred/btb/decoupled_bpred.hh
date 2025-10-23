@@ -178,7 +178,7 @@ class DecoupledBPUWithBTB : public BPredUnit
     // Helper function to validate FTQ and FSQ state before enqueueing
     bool validateFTQEnqueue();
 
-    void makeNewPrediction(bool create_new_stream);
+    void processNewPrediction(bool create_new_stream);
 
     FtqEntry createFtqEntryFromStream(const FetchStream &stream, const FetchTargetEnqState &ftq_enq_state);
 

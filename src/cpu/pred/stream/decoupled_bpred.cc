@@ -889,7 +889,7 @@ DecoupledStreamBPU::tryEnqFetchStream()
             DPRINTF(DecoupleBP || debugFlagOn,
                     "FSQ is not empty and the latest stream hasn't ended\n");
         }
-        makeNewPrediction(should_create_new_stream);
+        processNewPrediction(should_create_new_stream);
 
         const auto &back = fetchStreamQueue.rbegin()->second;
         if (!back.getEnded()) {
@@ -1108,7 +1108,7 @@ DecoupledStreamBPU::histShiftIn(Addr hash, boost::dynamic_bitset<> &history)
 }
 
 void
-DecoupledStreamBPU::makeNewPrediction(bool create_new_stream)
+DecoupledStreamBPU::processNewPrediction(bool create_new_stream)
 {
     DPRINTF(DecoupleBP, "Try to make new prediction\n");
     FetchStream entry_new;

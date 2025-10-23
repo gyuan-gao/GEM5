@@ -230,7 +230,7 @@ class DecoupledStreamBPU : public BPredUnit
 
     void tryEnqFetchTarget();
 
-    void makeNewPrediction(bool create_new_stream);
+    void processNewPrediction(bool create_new_stream);
 
     Addr alignToCacheLine(Addr addr)
     {
