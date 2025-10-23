@@ -132,7 +132,7 @@ Main prediction cycle function that:
 - Creates new fetch streams
 - Updates prediction state
 
-#### `makeNewPrediction()`
+#### `processNewPrediction()`
 - Uses various predictor components for prediction
 - Integrates prediction results
 - Creates new FetchStream entries
