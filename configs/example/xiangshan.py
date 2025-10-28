@@ -146,7 +146,8 @@ def build_test_system(np, args):
             test_sys.cpu[i].branchPred.isDumpMisspredPC = True
 
         else:
-            test_sys.cpu[i].branchPred = ObjectList.bp_list.get(args.bp_type)
+            BPClass = ObjectList.bp_list.get(args.bp_type)
+            test_sys.cpu[i].branchPred = BPClass()
 
         if args.indirect_bp_type:
             IndirectBPClass = ObjectList.indirect_bp_list.get(
