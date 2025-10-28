@@ -117,7 +117,10 @@ tageStats(this, p.numPredictors)
 
 #ifndef UNIT_TEST
     hasDB = true;
-    dbName = std::string("tage");
+    switch (getDelay()) {
+        case 0: dbName = std::string("microtage"); break;
+        default: dbName = std::string("tage"); break;
+    }
 #endif
 }
 
@@ -576,8 +579,13 @@ BTBTAGE::update(const FetchStream &stream) {
     // Process each BTB entry
     for (auto &btb_entry : entries_to_update) {
         bool actual_taken = stream.exeTaken && stream.exeBranchInfo == btb_entry;
-        // Re-read providers using snapshot (do not rely on prediction-time main/alt)
-        auto recomputed = generateSinglePrediction(btb_entry, alignedPC, predMeta);
+        TagePrediction recomputed;
+        if (false) {
+            // Re-read providers using snapshot (do not rely on prediction-time main/alt)
+            recomputed = generateSinglePrediction(btb_entry, alignedPC, predMeta);
+        } else {
+            recomputed = predMeta->preds[btb_entry.pc];
+        }
 
         // Update predictor state and check if need to allocate new entry
         bool need_allocate = updatePredictorStateAndCheckAllocation(btb_entry, actual_taken, recomputed, stream);
