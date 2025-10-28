@@ -233,3 +233,13 @@ jobs:
           cd $GEM5_HOME/util/xs_scripts/test_h
           bash ../kmh_6wide_h.sh /nfs/home/share/gem5_ci/checkpoints/gcbh_test.zstd
 
+  unit_tests:
+    runs-on: [self-hosted, open]
+    continue-on-error: false
+    name: XS-GEM5 - Unit Tests
+    steps:
+      - uses: actions/checkout@v2
+      - name: Build unit tests and run them
+        run: |
+          CC=gcc CXX=g++ scons build/RISCV/unittests.opt -j100 --unit-test
+
