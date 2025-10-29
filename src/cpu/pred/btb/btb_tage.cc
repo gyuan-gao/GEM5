@@ -41,7 +41,8 @@ BTBTAGE::BTBTAGE(unsigned numPredictors, unsigned numWays, unsigned tableSize)
       baseTableSize(2048),
       maxBranchPositions(32),
       useAltOnNaSize(1024),
-      useAltOnNaWidth(7)
+      useAltOnNaWidth(7),
+      updateOnRead(false)
 {
     setNumDelay(1);
 
@@ -73,6 +74,7 @@ useAltOnNaSize(p.useAltOnNaSize),
 useAltOnNaWidth(p.useAltOnNaWidth),
 numTablesToAlloc(p.numTablesToAlloc),
 enableSC(p.enableSC),
+updateOnRead(p.updateOnRead),
 tageStats(this, p.numPredictors)
 {
     this->needMoreHistories = p.needMoreHistories;
@@ -422,17 +424,32 @@ BTBTAGE::updatePredictorStateAndCheckAllocation(const BTBEntry &entry,
 
         auto &way = tageTable[main_info.table][main_info.index][main_info.way];
 
-        // Update useful bit if predictions differ
-        
-        if (main_info.taken() != alt_taken) {
-            if (actual_taken == main_info.taken()) {
-                if (way.useful < 3) way.useful++;
-            }
-        }
-        DPRINTF(TAGE, "useful bit set to %d\n", way.useful);
-        
         // Update prediction counter
         updateCounter(actual_taken, 3, way.counter);
+
+        // Update useful bit based on several conditions
+        bool main_is_correct = main_info.taken() == actual_taken;
+        bool alt_is_correct_and_strong = alt_info.found &&
+                                     (alt_info.taken() == actual_taken) &&
+                                     (abs(2 * alt_info.entry.counter + 1) == 7);
+
+        // a. Special reset (humility mechanism)
+        if (alt_is_correct_and_strong && main_is_correct) {
+            way.useful = 0;
+            DPRINTF(TAGEUseful, "useful bit reset to 0 due to humility rule\n");
+        } else if (main_info.taken() != alt_taken) {
+            // b. Original logic to set useful bit high
+            if (main_is_correct) {
+                way.useful = 1;
+            }
+        }
+
+        // c. Reset u on counter sign flip (becomes weak)
+        if (way.counter == 0 || way.counter == -1) {
+            way.useful = 0;
+            DPRINTF(TAGEUseful, "useful bit reset to 0 due to weak counter\n");
+        }
+        DPRINTF(TAGE, "useful bit is now %d\n", way.useful);
 
         // No LRU maintenance
     }
@@ -522,14 +539,25 @@ BTBTAGE::handleNewEntryAllocation(const Addr &alignedPC,
                 short newCounter = actual_taken ? 0 : -1;
                 DPRINTF(TAGE, "allocating entry in table %d[%lu][%u], tag %lu, counter %d\n",
                         ti, newIndex, way, newTag, newCounter);
-                cand = TageEntry(newTag, newCounter, entry.pc);
-                cand.useful = 1;
+                cand = TageEntry(newTag, newCounter, entry.pc); // u = 0 default
                 tageStats.updateAllocSuccess++;
                 allocated_table = ti;
                 allocated_index = newIndex;
                 allocated_way = way;
                 usefulResetCnt = usefulResetCnt <= 0 ? 0 : usefulResetCnt - 1;
                 return true;
+            }
+        }
+
+        // 3) Apply age penalty to one strong, not-useful way to make it replacable later
+        for (unsigned way = 0; way < numWays; ++way) {
+            auto &cand = set[way];
+            const bool weakish = std::abs(cand.counter * 2 + 1) <= 3;
+            if (!cand.useful && !weakish) {
+                if (cand.counter > 0) cand.counter--; else cand.counter++;
+                DPRINTF(TAGE, "age penalty applied on table %d[%lu][%u], new ctr %d\n",
+                        ti, newIndex, way, cand.counter);
+                break; // one penalty per table per update
             }
         }
 
@@ -544,7 +572,7 @@ BTBTAGE::handleNewEntryAllocation(const Addr &alignedPC,
         for (auto &table : tageTable) {
             for (auto &set : table) {
                 for (auto &way : set) {
-                    way.useful >>= 1; // divide by 2
+                    way.useful = false;
                 }
             }
         }
@@ -580,10 +608,10 @@ BTBTAGE::update(const FetchStream &stream) {
     for (auto &btb_entry : entries_to_update) {
         bool actual_taken = stream.exeTaken && stream.exeBranchInfo == btb_entry;
         TagePrediction recomputed;
-        if (false) {
+        if (updateOnRead) { // if update on read is enabled, re-read providers using snapshot
             // Re-read providers using snapshot (do not rely on prediction-time main/alt)
             recomputed = generateSinglePrediction(btb_entry, alignedPC, predMeta);
-        } else {
+        } else { // otherwise, use the prediction from the prediction-time main/alt
             recomputed = predMeta->preds[btb_entry.pc];
         }
 
