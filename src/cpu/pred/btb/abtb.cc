@@ -30,7 +30,6 @@
 #include "cpu/pred/btb/abtb.hh"
 
 #include "base/intmath.hh"
-#include "debug/ABTB.hh"
 #include "stream_struct.hh"
 
 // Additional conditional includes based on build mode
@@ -41,6 +40,7 @@
     #include "cpu/o3/dyn_inst.hh"
     #include "debug/AheadPipeline.hh"
     #include "debug/Fetch.hh"
+    #include "debug/ABTB.hh"
 #endif
 
 namespace gem5
