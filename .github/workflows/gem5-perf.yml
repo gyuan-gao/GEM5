@@ -1,10 +1,15 @@
-name: gem5 Performance Test
+name: gem5 Performance Test (Tier 2 - Post-Merge)
 
 on:
   push:
     branches: [ xs-dev ]
-  pull_request:
-    branches: [ xs-dev ]
+  # Removed pull_request trigger - use /run-spec for on-demand testing
+  workflow_dispatch:
+    inputs:
+      branch_name:
+        description: 'Branch to test (leave empty for current branch)'
+        required: false
+        type: string
 
 jobs:
   perf_test:
