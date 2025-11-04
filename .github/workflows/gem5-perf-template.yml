@@ -75,17 +75,7 @@ jobs:
               exit 1
               ;;
           esac
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          # 使用本地数据处理仓库，避免GitHub网络问题
-          cp -r /nfs/home/share/gem5_ci/DRAMsim3 .
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 fast
         run: |
           export GEM5_HOME=$(pwd)

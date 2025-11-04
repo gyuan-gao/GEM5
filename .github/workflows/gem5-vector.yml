@@ -18,16 +18,7 @@ jobs:
     name: XS-GEM5 - Running vector test
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: |
           CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64 --rvv-impl=simple

@@ -20,15 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       
-      - name: Build DRAMSim (cached)
-        run: |
-          cd ext/dramsim3
-          # 使用本地缓存避免网络IO
-          if [ ! -d "DRAMsim3" ]; then
-            cp -r /nfs/home/share/gem5_ci/DRAMsim3 .
-          fi
-          cd DRAMsim3 && mkdir -p build && cd build
-          cmake .. && make -j 48
+      - uses: ./.github/actions/build-dramsim
       
       - name: Build GEM5 opt
         run: |

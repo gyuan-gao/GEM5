@@ -20,16 +20,7 @@ jobs:
     name: XS-GEM5 - Running test checkpoints
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone git@github.com:umd-memsys/DRAMSim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: |
           CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64
@@ -43,16 +34,7 @@ jobs:
     name: XS-GEM5 - Running h test checkpoints
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone git@github.com:umd-memsys/DRAMSim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: |
           CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64
@@ -65,16 +47,7 @@ jobs:
     name: XS-GEM5 - Check memory corruption
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 debug
         run: CC=gcc CXX=g++ scons build/RISCV/gem5.debug --linker=gold -j64
       - name: Memory check
@@ -89,16 +62,7 @@ jobs:
     name: XS-GEM5 - Test new simulation script on RV64GCB
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64
       - name: XS-GEM5 - Test xiangshan.py simulation scripts
@@ -116,16 +80,7 @@ jobs:
     name: XS-GEM5 - Test new simulation script on RV64GCBV
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64 --rvv-impl=simple
       - name: XS-GEM5 - Test xiangshan.py simulation scripts
@@ -162,16 +117,7 @@ jobs:
     name: XS-GEM5 - Test fix L2TLB bugs
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64
       - name: XS-GEM5 - Test xiangshan.py simulation scripts
@@ -189,16 +135,7 @@ jobs:
     name: XS-GEM5 - Test new simulation script on RV64GCBH
     steps:
       - uses: actions/checkout@v2
-      - name: Build DRAMSim
-        run: |
-          export GEM5_HOME=$(pwd)
-          cd ext/dramsim3
-          git clone https://github.com/umd-memsys/DRAMsim3.git DRAMsim3
-          cd DRAMsim3 && mkdir -p build
-          cd build
-          cmake ..
-          make -j 48
-          cd $GEM5_HOME
+      - uses: ./.github/actions/build-dramsim
       - name: Build GEM5 opt
         run: CC=gcc CXX=g++ scons build/RISCV/gem5.opt --linker=gold -j64
       - name: XS-GEM5 - Test xiangshan.py simulation scripts
