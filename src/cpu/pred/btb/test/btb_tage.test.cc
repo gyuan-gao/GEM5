@@ -800,6 +800,11 @@ TEST_F(BTBTAGETest, AllocationBehaviorWithMultipleWays) {
 
     EXPECT_GE(allocatedWay, 0) << "Entry should be allocated in one of the ways";
 
+    // Strengthen the first allocated entry to prevent it from being replaced
+    // This simulates that the first branch has been trained and should be protected
+    tage->tageTable[testTable][testIndex][allocatedWay].useful = true;
+    tage->tageTable[testTable][testIndex][allocatedWay].counter = 2; // Make it strong
+
     // Step 2: Attempt to fill remaining ways with different branches
     for (unsigned way = 0; way < tage->numWays; way++) {
         if (way == allocatedWay) continue;
@@ -820,6 +825,14 @@ TEST_F(BTBTAGETest, AllocationBehaviorWithMultipleWays) {
     }
 
     EXPECT_EQ(filledWays, tage->numWays) << "All ways should be filled after multiple allocations under miss policy";
+
+    // Strengthen all allocated entries to prevent replacement in Step 3
+    for (unsigned way = 0; way < tage->numWays; way++) {
+        if (tage->tageTable[testTable][testIndex][way].valid) {
+            tage->tageTable[testTable][testIndex][way].useful = true;
+            tage->tageTable[testTable][testIndex][way].counter = 2; // Make it strong
+        }
+    }
 
     // Stats: first allocation succeeded, subsequent attempts failed
     int alloc_success_after_step2 = tage->tageStats.updateAllocSuccess;

@@ -59,14 +59,14 @@ class BTBTAGE : public TimedBaseBTBPredictor
             bool valid;      // Whether this entry is valid
             Addr tag;       // Tag for matching
             short counter;  // Prediction counter (-4 to 3), 3bits， 0 and -1 are weak
-            uint8_t useful;    // 2-bit usefulness counter; >0 means useful
+            bool useful;    // 1-bit usefulness counter; true means useful
             Addr pc;        // branch pc, like branch position, for btb entry pc check
             unsigned lruCounter; // Counter for LRU replacement policy
 
-            TageEntry() : valid(false), tag(0), counter(0), useful(0), pc(0), lruCounter(0) {}
+            TageEntry() : valid(false), tag(0), counter(0), useful(false), pc(0), lruCounter(0) {}
 
             TageEntry(Addr tag, short counter, Addr pc) :
-                      valid(true), tag(tag), counter(counter), useful(0), pc(pc), lruCounter(0) {}
+                      valid(true), tag(tag), counter(counter), useful(false), pc(pc), lruCounter(0) {}
             bool taken() const {
                 return counter >= 0;
             }
@@ -250,6 +250,9 @@ class BTBTAGE : public TimedBaseBTBPredictor
     const unsigned useAltOnNaWidth;
     std::vector<short> useAlt;
 
+    // useful bit reset counter, when cnt >= 256, reset useful bit of all entries
+    int usefulResetCnt{0};
+
     // Check if a tag matches
     bool matchTag(Addr expected, Addr found);
 
@@ -274,9 +277,6 @@ class BTBTAGE : public TimedBaseBTBPredictor
     // Get index for useAlt table
     Addr getUseAltIdx(Addr pc);
 
-    // Counter for useful bit reset algorithm
-    int usefulResetCnt;
-
     // Cache for TAGE indices
     std::vector<Addr> tageIndex;
 
@@ -285,6 +285,9 @@ class BTBTAGE : public TimedBaseBTBPredictor
 
     // Whether statistical corrector is enabled
     bool enableSC;
+
+    // Whether to update on read
+    bool updateOnRead;
 
 #ifdef UNIT_TEST
     typedef uint64_t Scalar;
@@ -322,8 +325,6 @@ class BTBTAGE : public TimedBaseBTBPredictor
 #ifndef UNIT_TEST
         statistics::Distribution predTableHits;
         statistics::Distribution updateTableHits;
-        statistics::Distribution updateResetUCtrInc;
-        statistics::Distribution updateResetUCtrDec;
 
         statistics::Vector updateTableMispreds;
 #endif
@@ -354,40 +355,21 @@ public:
     // Metadata for TAGE predictions
     typedef struct TageMeta {
         std::unordered_map<Addr, TagePrediction> preds;
-        std::vector<bitset> usefulMask;  // Vector of usefulMasks for different ways
-        unsigned hitWay;      // hit way index
-        bool hitFound;        // whether a hit was found
         std::vector<FoldedHist> tagFoldedHist;
         std::vector<FoldedHist> altTagFoldedHist;
         std::vector<FoldedHist> indexFoldedHist;
         bitset history;     // for viewing
-        TageMeta(std::unordered_map<Addr, TagePrediction> preds, std::vector<bitset> usefulMask,
-                unsigned hitWay, bool hitFound, std::vector<FoldedHist> tagFoldedHist,
-                std::vector<FoldedHist> altTagFoldedHist, std::vector<FoldedHist> indexFoldedHist, bitset &history) :
-            preds(preds), usefulMask(usefulMask), hitWay(hitWay), hitFound(hitFound),
-            tagFoldedHist(tagFoldedHist), altTagFoldedHist(altTagFoldedHist),
-            indexFoldedHist(indexFoldedHist), history(history) {}
-        TageMeta() : hitWay(0), hitFound(false) {}
-        TageMeta(const TageMeta &other) {
-            preds = other.preds;
-            usefulMask = other.usefulMask;
-            hitWay = other.hitWay;
-            hitFound = other.hitFound;
-            tagFoldedHist = other.tagFoldedHist;
-            altTagFoldedHist = other.altTagFoldedHist;
-            indexFoldedHist = other.indexFoldedHist;
-            history = other.history;
-            // scMeta = other.scMeta;
-        }
+        TageMeta() {}
     } TageMeta;
 
 private:
-    // Helper method to record useful bit in all TAGE tables
-    void recordUsefulMask(const Addr &alignedPC);
 
     // Helper method to generate prediction for a single BTB entry
-    TagePrediction generateSinglePrediction(const BTBEntry &btb_entry, 
-                                           const Addr &alignedPC);
+    // If predMeta is provided, use snapshot folded history for index/tag calculation (update path)
+    // If predMeta is nullptr, use current folded history (prediction path)
+    TagePrediction generateSinglePrediction(const BTBEntry &btb_entry,
+                                           const Addr &alignedPC,
+                                           const std::shared_ptr<TageMeta> predMeta = nullptr);
 
     // Helper method to prepare BTB entries for update
     std::vector<BTBEntry> prepareUpdateEntries(const FetchStream &stream);
@@ -398,14 +380,10 @@ private:
                                  const TagePrediction &pred,
                                  const FetchStream &stream);
 
-    // Helper method to handle useful bit reset
-    void handleUsefulBitReset(const std::vector<bitset> &useful_mask, unsigned way = 0, bool found = false);
-
     // Helper method to handle new entry allocation
     bool handleNewEntryAllocation(const Addr &alignedPC,
                                  const BTBEntry &entry,
                                  bool actual_taken,
-                                 const std::vector<bitset> &useful_mask,
                                  unsigned main_table,
                                  std::shared_ptr<TageMeta> meta,
                                  uint64_t &allocated_table,

@@ -217,7 +217,9 @@ MBTB::processEntries(const std::vector<TickedBTBEntry>& entries, Addr startAddr)
         DPRINTF(BTB, "BTB: lookup hit, dumping hit entry\n");
         btbStats.predHit++;
         btbStats.predHitNum += hitNum;
+#ifndef UNIT_TEST
         btbStats.predHitCount.sample(hitNum);
+#endif
         for (auto &entry: processed_entries) {
             printTickedBTBEntry(entry);
         }
