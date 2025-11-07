@@ -39,7 +39,7 @@ DecoupledBPUWithBTB::DecoupledBPUWithBTB(const DecoupledBPUWithBTBParams &p)
       ittage(p.ittage),
       mgsc(p.mgsc),
       ras(p.ras),
-    //   uras(p.uras),
+      // uras(p.uras),
       bpDBSwitches(p.bpDBSwitches),
       numStages(p.numStages),
       historyManager(16), // TODO: fix this
@@ -1028,7 +1028,8 @@ DecoupledBPUWithBTB::trapSquash(unsigned target_id, unsigned stream_id,
     handleSquash(target_id, stream_id, SQUASH_TRAP, inst_pc, inst_pc.instAddr());
 }
 
-void DecoupledBPUWithBTB::update(unsigned stream_id, ThreadID tid)
+void
+DecoupledBPUWithBTB::update(unsigned stream_id, ThreadID tid)
 {
     // No need to dequeue when queue is empty
     if (fetchStreamQueue.empty())
@@ -1041,12 +1042,11 @@ void DecoupledBPUWithBTB::update(unsigned stream_id, ThreadID tid)
         auto &stream = it->second;
 
         DPRINTF(DecoupleBP,
-            "Commit stream start %#lx, which is predicted, "
-            "final br addr: %#lx, final target: %#lx, pred br addr: %#lx, "
-            "pred target: %#lx\n",
-            stream.startPC,
-            stream.exeBranchInfo.pc, stream.exeBranchInfo.target,
-            stream.predBranchInfo.pc, stream.predBranchInfo.target);
+                "Commit stream start %#lx, which is predicted, "
+                "final br addr: %#lx, final target: %#lx, pred br addr: %#lx, "
+                "pred target: %#lx\n",
+                stream.startPC, stream.exeBranchInfo.pc, stream.exeBranchInfo.target, stream.predBranchInfo.pc,
+                stream.predBranchInfo.target);
 
         // Update statistics
         updateStatistics(stream);
@@ -1058,8 +1058,7 @@ void DecoupledBPUWithBTB::update(unsigned stream_id, ThreadID tid)
         dbpBtbStats.fsqEntryCommitted++;
     }
 
-    DPRINTF(DecoupleBP, "after commit stream, fetchStreamQueue size: %lu\n",
-            fetchStreamQueue.size());
+    DPRINTF(DecoupleBP, "after commit stream, fetchStreamQueue size: %lu\n", fetchStreamQueue.size());
 
     if (it != fetchStreamQueue.end()) {
         printStream(it->second);
@@ -1157,6 +1156,62 @@ DecoupledBPUWithBTB::updateStatistics(const FetchStream &stream)
 }
 
 void
+DecoupledBPUWithBTB::resolveUpdate(unsigned &stream_id)
+{
+    auto stream_it = fetchStreamQueue.find(stream_id);
+    if (stream_it == fetchStreamQueue.end()) {
+        DPRINTF(DecoupleBP, "Stream id %u not found in fetchStreamQueue, cannot update predictors\n", stream_id);
+        return;
+    }
+
+    auto &stream = stream_it->second;
+
+    // Update predictor components only if the stream is hit or taken
+    if (stream.isHit || stream.exeTaken) {
+        // Update predictor components
+        for (int i = 0; i < numComponents; ++i) {
+            if (components[i]->getResolvedUpdate()) {
+                components[i]->update(stream);
+            }
+        }
+    }
+}
+
+void
+DecoupledBPUWithBTB::prepareResolveUpdateEntries(unsigned &stream_id)
+{
+    auto stream_it = fetchStreamQueue.find(stream_id);
+    if (stream_it == fetchStreamQueue.end()) {
+        DPRINTF(DecoupleBP, "Stream id %u not found in fetchStreamQueue, cannot update predictors\n", stream_id);
+        return;
+    }
+    auto &stream = stream_it->second;
+
+    if (stream.isHit || stream.exeTaken) {
+        // Prepare stream for update
+        stream.setUpdateInstEndPC(predictWidth);
+        stream.setUpdateBTBEntries();
+
+        // only mbtb can generate new entry
+        mbtb->getAndSetNewBTBEntry(stream);
+    }
+}
+
+void
+DecoupledBPUWithBTB::markCFIResolved(unsigned &stream_id, uint64_t resolvedInstPC)
+{
+
+    auto stream_it = fetchStreamQueue.find(stream_id);
+    if (stream_it == fetchStreamQueue.end()) {
+        DPRINTF(DecoupleBP, "Stream id %u not found in fetchStreamQueue, cannot update predictors\n", stream_id);
+        return;
+    }
+    auto &stream = stream_it->second;
+
+    stream.markBTBEntryResolved(resolvedInstPC);
+}
+
+void
 DecoupledBPUWithBTB::updatePredictorComponents(FetchStream &stream)
 {
     // Update predictor components only if the stream is hit or taken
@@ -1168,9 +1223,11 @@ DecoupledBPUWithBTB::updatePredictorComponents(FetchStream &stream)
         // only mbtb can generate new entry
         mbtb->getAndSetNewBTBEntry(stream);
 
-        // Update all predictor components
+        // Update predictor components
         for (int i = 0; i < numComponents; ++i) {
-            components[i]->update(stream);
+            if (!components[i]->getResolvedUpdate()) {
+                components[i]->update(stream);
+            }
         }
     }
 }

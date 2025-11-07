@@ -25,6 +25,7 @@ def setKmhV3IdealParams(args, system):
         # fetch
         cpu.mmu.itb.size = 96
         cpu.fetchWidth = 32
+        cpu.iewToFetchDelay = 2 # for resolved update, should train branch after squash
         cpu.commitToFetchDelay = 2
         cpu.fetchQueueSize = 64
         cpu.fetchToDecodeDelay = 2
@@ -141,7 +142,7 @@ def setKmhV3IdealParams(args, system):
 if __name__ == '__m5_main__':
     FutureClass = None
 
-    args = xiangsha_system_init()
+    args = xiangshan_system_init()
 
     assert not args.external_memory_system
 
