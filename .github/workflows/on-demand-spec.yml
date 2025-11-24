@@ -83,7 +83,7 @@ jobs:
     needs: trigger
     uses: ./.github/workflows/gem5-perf-template.yml
     with:
-      script_path: ../kmh_v3_btb.sh
+      script_path: ../kmh_v3_ideal.sh
       benchmark_type: ${{ needs.trigger.outputs.benchmark_type }}
       vector_type: ${{ needs.trigger.outputs.vector_type }}
       pr_ref: ${{ needs.trigger.outputs.pr_ref }}

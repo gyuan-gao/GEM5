@@ -19,10 +19,10 @@ from common.Caches import *
 from common.xiangshan import *
 
 
-def setKmhV3IdealParams(args, system):
+def setKmhV3Params(args, system):
     for cpu in system.cpu:
 
-        # fetch
+        # fetch (idealfetch not care)
         cpu.mmu.itb.size = 96
         cpu.fetchWidth = 32
         cpu.iewToFetchDelay = 2 # for resolved update, should train branch after squash
@@ -32,27 +32,42 @@ def setKmhV3IdealParams(args, system):
 
         # decode
         cpu.decodeWidth = 8
-        cpu.enable_loadFusion = True
+        cpu.enable_loadFusion = False
         cpu.enableConstantFolding = False
 
         # rename
         cpu.renameWidth = 8
         cpu.numPhysIntRegs = 224
         cpu.numPhysFloatRegs = 256
+        cpu.enable_storeSet_train = False
 
         # dispatch
-        cpu.enableDispatchStage = True
+        cpu.enableDispatchStage = False
         cpu.numDQEntries = [8, 8, 8]
         cpu.dispWidth = [8, 8, 8]
 
         # scheduler
         cpu.scheduler = KMHV3Scheduler()
+        cpu.scheduler.disableAllRegArb()
+        cpu.scheduler.enableMainRdpOpt = False
+        cpu.scheduler.intRegfileBanks = 1
+        # intiq0
+        cpu.scheduler.IQs[0].oports[0].rp = [IntRD(0, 0), IntRD(1, 0)]
+        cpu.scheduler.IQs[0].oports[1].rp = [IntRD(0, 1), IntRD(1, 1)]
+
+        # intiq1
+        cpu.scheduler.IQs[1].oports[0].rp = [IntRD(2, 0), IntRD(3, 0)]
+        cpu.scheduler.IQs[1].oports[1].rp = [IntRD(2, 1), IntRD(3, 1)]
+
+        # intiq2
+        cpu.scheduler.IQs[2].oports[0].rp = [IntRD(4, 0), IntRD(5, 0)]
+        cpu.scheduler.IQs[2].oports[1].rp = [IntRD(4, 1), IntRD(5, 1)]
 
         # rob
-        cpu.commitWidth = 12
-        cpu.squashWidth = 12
-        cpu.RobCompressPolicy = 'kmhv3'
-        cpu.numROBEntries = 160
+        cpu.commitWidth = 8
+        cpu.squashWidth = 8
+        cpu.RobCompressPolicy = 'none'
+        cpu.numROBEntries = 352
         cpu.CROB_instPerGroup = 2 # 1 if not using ROB compression
 
         # lsu
@@ -60,10 +75,10 @@ def setKmhV3IdealParams(args, system):
         cpu.EnableLdMissReplay = True
         cpu.EnablePipeNukeCheck = True
         cpu.BankConflictCheck = True
-        cpu.sbufferBankWriteAccurately = True
+        cpu.sbufferBankWriteAccurately = False
 
         # lsq
-        cpu.LQEntries = 128
+        cpu.LQEntries = 120
         cpu.SQEntries = 64
         cpu.RARQEntries = 96
         cpu.RAWQEntries = 56
@@ -71,8 +86,9 @@ def setKmhV3IdealParams(args, system):
         cpu.StoreCompletionWidth = 4
         cpu.RARDequeuePerCycle = 4
         cpu.RAWDequeuePerCycle = 4
-        cpu.SbufferEntries = 24
-        cpu.SbufferEvictThreshold = 16
+        cpu.SbufferEntries = 16
+        cpu.SbufferEvictThreshold = 7
+        cpu.store_prefetch_train = False
 
         # branch predictor
         if args.bp_type == 'DecoupledBPUWithBTB':
@@ -84,35 +100,38 @@ def setKmhV3IdealParams(args, system):
         if args.caches:
             cpu.icache.size = '64kB'
             cpu.dcache.size = '64kB'
-            cpu.dcache.tag_load_read_ports = 100
+            cpu.dcache.tag_load_read_ports = 3
             cpu.dcache.mshrs = 16
 
     # l2 caches
     if args.l2cache:
         for i in range(args.num_cpus):
             if args.classic_l2:
-                system.l2_caches[i].slice_num = 0 # 4 -> 0, no slice
+                system.l2_caches[i].slice_num = 4
+                system.l2_caches[i].wpu = NULL
             else:
                 l2_wrapper = system.l2_wrappers[i]
-                l2_wrapper.data_sram_banks = 2
-                l2_wrapper.dir_sram_banks = 2
-                l2_wrapper.pipe_dir_write_stage = 4
-                l2_wrapper.dir_read_bypass = True
-            system.tol2bus_list[i].forward_latency = 0  # 3->0
-            system.tol2bus_list[i].response_latency = 0  # 3->0
-            system.tol2bus_list[i].hint_wakeup_ahead_cycles = 0  # 2->0
+                l2_wrapper.data_sram_banks = 1
+                l2_wrapper.dir_sram_banks = 1
+                l2_wrapper.pipe_dir_write_stage = 3
+                l2_wrapper.dir_read_bypass = False
+                for j in range(args.l2_slices):
+                    l2_wrapper.slices[j].inner_cache.wpu = NULL
+            system.tol2bus_list[i].forward_latency = 3  # 3->0
+            system.tol2bus_list[i].response_latency = 3  # 3->0
+            system.tol2bus_list[i].hint_wakeup_ahead_cycles = 2  # 2->0
 
             # Enable dual-port for DCache → L2 communication
             # ReqLayer[0]: ICache+DCache+ITB+DTB → L2, allow 2 requests per cycle
             # RespLayer[1]: L2 → DCache, allow 2 responses per cycle
-            system.tol2bus_list[i].layer_bandwidth_configs = [
-                LayerBandwidthConfig(direction="req", port_index=0, max_per_cycle=2),
-                LayerBandwidthConfig(direction="resp", port_index=1, max_per_cycle=2),
-            ]
+            # system.tol2bus_list[i].layer_bandwidth_configs = [
+            #     LayerBandwidthConfig(direction="req", port_index=0, max_per_cycle=2),
+            #     LayerBandwidthConfig(direction="resp", port_index=1, max_per_cycle=2),
+            # ]
 
     # l3 cache
     if args.l3cache:
-        system.l3.mshrs = 128
+        system.l3.mshrs = 64
 
 if __name__ == '__m5_main__':
     FutureClass = None
@@ -131,7 +150,7 @@ if __name__ == '__m5_main__':
 
     test_sys = build_xiangshan_system(args)
     # Set ideal parameters here with the highest priority, over command-line arguments
-    setKmhV3IdealParams(args, test_sys)
+    setKmhV3Params(args, test_sys)
 
     root = Root(full_system=True, system=test_sys)
 
