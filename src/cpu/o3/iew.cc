@@ -1793,10 +1793,9 @@ IEW::executeInsts()
         }
     }
 
-    sortResolveQueue();
     if (!resolveQueue.empty()) {
-        ResolveQueueEntry entry = resolveQueue.back();
-        resolveQueue.pop_back();
+        ResolveQueueEntry entry = resolveQueue.front();
+        resolveQueue.erase(resolveQueue.begin());
         toFetch->iewInfo[tid].resolveQueue.push_back(entry);
     }
 
