@@ -191,12 +191,11 @@ class BTBTAGE : public TimedBaseBTBPredictor
     Addr getBaseTableIndex(Addr pc);
 
     // Get branch index within a prediction block
-    unsigned getBranchIndexInBlock(Addr pc, Addr startPC);
+    unsigned getBranchIndexInBlock(Addr branchPC, Addr startPC);
 
-    // Get bank ID from aligned PC
-    // Extract pc[bankIdShift+bankIdWidth-1 : bankIdShift]
-    // For 32B blocks with 4 banks: pc[6:5]
-    unsigned getBankId(Addr alignedPC) const;
+    // Get bank ID from PC (after removing instruction alignment bits)
+    // Extract bits [bankBaseShift + bankIdWidth - 1 : bankBaseShift]
+    unsigned getBankId(Addr pc) const;
 
     // Update branch history
     void doUpdateHist(const bitset &history, bool taken, Addr pc, Addr target);
@@ -303,8 +302,9 @@ class BTBTAGE : public TimedBaseBTBPredictor
     // When prediction and update access the same bank in one cycle, update is dropped
     const unsigned numBanks;         // Number of banks (e.g., 4)
     const unsigned bankIdWidth;      // log2(numBanks), computed in constructor
-    const unsigned bankIdShift;      // floorLog2(blockSize), e.g., 5 for 32B blocks
-    const unsigned indexShift;       // bankIdShift + bankIdWidth, e.g., 7 for 32B + 4 banks
+    const unsigned blockWidth;       // floorLog2(blockSize), e.g., 5 for 32B blocks
+    const unsigned bankBaseShift;    // Bits removed before bank selection (default: instShiftAmt)
+    const unsigned indexShift;       // bankBaseShift + bankIdWidth when banking enabled
     bool enableBankConflict;         // Enable/disable bank conflict simulation
 
     // Track last prediction bank for conflict detection

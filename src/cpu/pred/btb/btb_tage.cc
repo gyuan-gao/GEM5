@@ -45,8 +45,9 @@ BTBTAGE::BTBTAGE(unsigned numPredictors, unsigned numWays, unsigned tableSize, u
       updateOnRead(false),
       numBanks(numBanks),
       bankIdWidth(ceilLog2(numBanks)),
-      bankIdShift(floorLog2(blockSize)),
-      indexShift(floorLog2(blockSize) + ceilLog2(numBanks)),
+      blockWidth(floorLog2(blockSize)),
+      bankBaseShift(instShiftAmt),
+      indexShift(bankBaseShift + ceilLog2(numBanks)),
       enableBankConflict(false),
       lastPredBankId(0),
       predBankValid(false)
@@ -84,8 +85,9 @@ enableSC(p.enableSC),
 updateOnRead(p.updateOnRead),
 numBanks(p.numBanks),
 bankIdWidth(ceilLog2(p.numBanks)),
-bankIdShift(floorLog2(blockSize)),
-indexShift(floorLog2(blockSize) + ceilLog2(p.numBanks)),
+blockWidth(floorLog2(blockSize)),
+bankBaseShift(instShiftAmt), // strip instruction alignment bits before indexing
+indexShift(bankBaseShift + ceilLog2(p.numBanks)),
 enableBankConflict(p.enableBankConflict),
 lastPredBankId(0),
 predBankValid(false),
@@ -343,11 +345,8 @@ BTBTAGE::lookupHelper(const Addr &startPC, const std::vector<BTBEntry> &btbEntri
  */
 void
 BTBTAGE::putPCHistory(Addr startPC, const bitset &history, std::vector<FullBTBPrediction> &stagePreds) {
-    // use 32byte(blockSize) aligned PC for prediction(get index and tag)
-    Addr alignedPC = startPC & ~(blockSize - 1);
-
     // Record prediction bank for next tick's conflict detection
-    lastPredBankId = getBankId(alignedPC);
+    lastPredBankId = getBankId(startPC);
     predBankValid = true;
 
 #ifndef UNIT_TEST
@@ -355,8 +354,8 @@ BTBTAGE::putPCHistory(Addr startPC, const bitset &history, std::vector<FullBTBPr
     tageStats.predAccessPerBank[lastPredBankId]++;
 #endif
 
-    DPRINTF(TAGE, "putPCHistory startAddr: %#lx, alignedPC: %#lx, bank: %u\n",
-            startPC, alignedPC, lastPredBankId);
+    DPRINTF(TAGE, "putPCHistory startAddr: %#lx, bank: %u\n",
+            startPC, lastPredBankId);
 
     // IMPORTANT: when this function is called,
     // btb entries should already be in stagePreds
@@ -648,11 +647,9 @@ BTBTAGE::handleNewEntryAllocation(const Addr &startPC,
 void
 BTBTAGE::update(const FetchStream &stream) {
     Addr startAddr = stream.getRealStartPC();
-    Addr alignedPC = startAddr & ~(blockSize - 1);
-    unsigned updateBank = getBankId(alignedPC);
+    unsigned updateBank = getBankId(startAddr);
 
-    DPRINTF(TAGE, "update startAddr: %#lx, alignedPC: %#lx, bank: %u\n",
-            startAddr, alignedPC, updateBank);
+    DPRINTF(TAGE, "update startAddr: %#lx, bank: %u\n", startAddr, updateBank);
 
 #ifndef UNIT_TEST
     // Record update access per bank
@@ -807,8 +804,8 @@ BTBTAGE::getTageTag(Addr pc, int t, uint64_t foldedHist, uint64_t altFoldedHist,
     // Create mask for tableTagBits[t] to limit result size
     Addr mask = (1ULL << tableTagBits[t]) - 1;
 
-    // Extract lower bits of PC directly
-    Addr pcBits = (pc >> floorLog2(blockSize)) & mask;
+    // Extract lower bits of PC directly (remove instruction alignment bits)
+    Addr pcBits = (pc >> bankBaseShift) & mask;
 
     // Extract and prepare folded history bits
     Addr foldedBits = foldedHist & mask;
@@ -832,15 +829,7 @@ BTBTAGE::getTageIndex(Addr pc, int t, uint64_t foldedHist)
     // Create mask for tableIndexBits[t] to limit result size
     Addr mask = (1ULL << tableIndexBits[t]) - 1;
 
-    // Index calculation skips bank bits to avoid bank aliasing only when
-    // bank conflict simulation is enabled.
-    // For 32B blocks (5 bits) with 4 banks (2 bits):
-    //   - pc[4:0]: block offset (ignored)
-    //   - pc[6:5]: bank ID (skipped)
-    //   - pc[N:7]: used for index calculation
-    // Each bank effectively manages 1/4 of the PC space with the same table
-    // size when enabled; otherwise we fall back to legacy indexing.
-    const unsigned pcShift = enableBankConflict ? indexShift : bankIdShift;
+    const unsigned pcShift = enableBankConflict ? indexShift : bankBaseShift;
     Addr pcBits = (pc >> pcShift) & mask;
     Addr foldedBits = foldedHist & mask;
 
@@ -879,33 +868,30 @@ BTBTAGE::satDecrement(int min, short &counter)
 
 Addr
 BTBTAGE::getUseAltIdx(Addr pc) {
-    return (pc >> instShiftAmt) & (useAlt.size() - 1); // need modify
+    Addr shiftedPc = pc >> instShiftAmt;
+    return shiftedPc & (useAltOnNaSize - 1);
 }
 
 Addr
 BTBTAGE::getBaseTableIndex(Addr pc) {
-    // Use 32-byte aligned address as index, covering 64-byte range
-    return ((pc >> 5) & (baseTableSize - 1));  // 32-byte alignment (2^5 = 32)
+    // Use blockSize-aligned address as index; block offset bits captured by blockWidth
+    return ((pc >> blockWidth) & (baseTableSize - 1));
 }
 
 unsigned
-BTBTAGE::getBranchIndexInBlock(Addr pc, Addr startPC) {
-    // Calculate branch position within the 64-byte block (0-31)
-    // alignedPC is guaranteed to be 32-byte aligned
+BTBTAGE::getBranchIndexInBlock(Addr branchPC, Addr startPC) {
+    // Calculate branch position within the fetch block (0 .. maxBranchPositions-1)
     Addr alignedPC = startPC & ~(blockSize - 1);
-    Addr offset = (pc - alignedPC) >> 1;  // Position index 0-31
+    Addr offset = (branchPC - alignedPC) >> instShiftAmt;
     assert(offset < maxBranchPositions);
     return offset;
 }
 
 unsigned
-BTBTAGE::getBankId(Addr alignedPC) const
+BTBTAGE::getBankId(Addr pc) const
 {
-    // Extract bank ID bits from aligned PC
-    // bankIdShift is the starting bit position (5 for 32B blocks)
-    // bankIdWidth is the number of bits (2 for 4 banks)
-    // Example: pc[6:5] for 32B blocks with 4 banks
-    return (alignedPC >> bankIdShift) & ((1 << bankIdWidth) - 1);
+    // Extract bank ID bits after removing instruction alignment
+    return (pc >> bankBaseShift) & ((1 << bankIdWidth) - 1);
 }
 
 /**
