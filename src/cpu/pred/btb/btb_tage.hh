@@ -165,8 +165,8 @@ class BTBTAGE : public TimedBaseBTBPredictor
 #endif
 
     // Look up predictions in TAGE tables for a stream of instructions
-    void lookupHelper(const Addr &alignedPC, const std::vector<BTBEntry> &btbEntries,
-                      std::unordered_map<Addr, TageInfoForMGSC> &tageInfoForMgscs, CondTakens& results);
+    void lookupHelper(const Addr &startPC, const std::vector<BTBEntry> &btbEntries,
+                    std::unordered_map<Addr, TageInfoForMGSC> &tageInfoForMgscs, CondTakens& results);
 
     // Calculate TAGE index for a given PC and table
     Addr getTageIndex(Addr pc, int table);
@@ -191,7 +191,7 @@ class BTBTAGE : public TimedBaseBTBPredictor
     Addr getBaseTableIndex(Addr pc);
 
     // Get branch index within a prediction block
-    unsigned getBranchIndexInBlock(Addr pc, Addr alignedPC);
+    unsigned getBranchIndexInBlock(Addr pc, Addr startPC);
 
     // Get bank ID from aligned PC
     // Extract pc[bankIdShift+bankIdWidth-1 : bankIdShift]
@@ -401,7 +401,7 @@ private:
     // If predMeta is provided, use snapshot folded history for index/tag calculation (update path)
     // If predMeta is nullptr, use current folded history (prediction path)
     TagePrediction generateSinglePrediction(const BTBEntry &btb_entry,
-                                           const Addr &alignedPC,
+                                           const Addr &startPC,
                                            const std::shared_ptr<TageMeta> predMeta = nullptr);
 
     // Helper method to prepare BTB entries for update
@@ -414,7 +414,7 @@ private:
                                  const FetchStream &stream);
 
     // Helper method to handle new entry allocation
-    bool handleNewEntryAllocation(const Addr &alignedPC,
+    bool handleNewEntryAllocation(const Addr &startPC,
                                  const BTBEntry &entry,
                                  bool actual_taken,
                                  unsigned main_table,

@@ -195,14 +195,14 @@ BTBTAGE::tickStart() {}
  * @brief Generate prediction for a single BTB entry by searching TAGE tables
  *
  * @param btb_entry The BTB entry to generate prediction for
- * @param alignedPC The aligned PC address for calculating indices and tags
+ * @param startPC The starting PC address for calculating indices and tags
  * @param predMeta Optional prediction metadata; if provided, use snapshot for index/tag
  *             calculation (update path); if nullptr, use current folded history (prediction path)
  * @return TagePrediction containing main and alternative predictions
  */
 BTBTAGE::TagePrediction
 BTBTAGE::generateSinglePrediction(const BTBEntry &btb_entry,
-                                 const Addr &alignedPC,
+                                 const Addr &startPC,
                                  std::shared_ptr<TageMeta> predMeta) {
     DPRINTF(TAGE, "generateSinglePrediction for btbEntry: %#lx\n", btb_entry.pc);
 
@@ -213,16 +213,16 @@ BTBTAGE::generateSinglePrediction(const BTBEntry &btb_entry,
 
     // Search from highest to lowest table for matches
     // Calculate branch position within the block (like RTL's cfiPosition)
-    unsigned position = getBranchIndexInBlock(btb_entry.pc, alignedPC);
+    unsigned position = getBranchIndexInBlock(btb_entry.pc, startPC);
 
     for (int i = numPredictors - 1; i >= 0; --i) {
         // Calculate index and tag: use snapshot if provided, otherwise use current folded history
         // Tag includes position XOR (like RTL: tag = tempTag ^ cfiPosition)
-        Addr index = predMeta ? getTageIndex(alignedPC, i, predMeta->indexFoldedHist[i].get())
-                          : getTageIndex(alignedPC, i);
-        Addr tag = predMeta ? getTageTag(alignedPC, i,
+        Addr index = predMeta ? getTageIndex(startPC, i, predMeta->indexFoldedHist[i].get())
+                          : getTageIndex(startPC, i);
+        Addr tag = predMeta ? getTageTag(startPC, i,
                             predMeta->tagFoldedHist[i].get(), predMeta->altTagFoldedHist[i].get(), position)
-                        : getTageTag(alignedPC, i, position);
+                        : getTageTag(startPC, i, position);
 
         bool match = false; // for each table, only one way can be matched
         TageEntry matching_entry;
@@ -266,8 +266,8 @@ BTBTAGE::generateSinglePrediction(const BTBEntry &btb_entry,
     bool main_taken = main_info.taken();
     bool alt_taken = alt_info.taken();
     // Use base table instead of btb_entry.ctr
-    Addr base_idx = getBaseTableIndex(alignedPC);
-    unsigned branch_idx = getBranchIndexInBlock(btb_entry.pc, alignedPC);
+    Addr base_idx = getBaseTableIndex(startPC);
+    unsigned branch_idx = getBranchIndexInBlock(btb_entry.pc, startPC);
     bool base_taken = getDelay() != 0 ? baseTable[base_idx][branch_idx] >= 0 : btb_entry.ctr >= 0;
     bool alt_pred = alt_provided ? alt_taken : base_taken; // if alt provided, use alt prediction, otherwise use base
 
@@ -296,21 +296,21 @@ BTBTAGE::generateSinglePrediction(const BTBEntry &btb_entry,
 /**
  * @brief Look up predictions in TAGE tables for a stream of instructions
  * 
- * @param alignedPC The aligned PC address for the instruction stream
+ * @param startPC The starting PC address for the instruction stream
  * @param btbEntries Vector of BTB entries to make predictions for
  * @return Map of branch PC addresses to their predicted outcomes
  */
 void
-BTBTAGE::lookupHelper(const Addr &alignedPC, const std::vector<BTBEntry> &btbEntries,
+BTBTAGE::lookupHelper(const Addr &startPC, const std::vector<BTBEntry> &btbEntries,
                       std::unordered_map<Addr, TageInfoForMGSC> &tageInfoForMgscs, CondTakens& results)
 {
-    DPRINTF(TAGE, "lookupHelper alignedPC: %#lx\n", alignedPC);
+    DPRINTF(TAGE, "lookupHelper startAddr: %#lx\n", startPC);
 
     // Process each BTB entry to make predictions
     for (auto &btb_entry : btbEntries) {
         // Only predict for valid conditional branches
         if (btb_entry.isCond && btb_entry.valid) {
-            auto pred = generateSinglePrediction(btb_entry, alignedPC);
+            auto pred = generateSinglePrediction(btb_entry, startPC);
             meta->preds[btb_entry.pc] = pred;
             tageStats.updateStatsWithTagePrediction(pred, true);
             results.push_back({btb_entry.pc, pred.taken || btb_entry.alwaysTaken});
@@ -337,14 +337,14 @@ BTBTAGE::lookupHelper(const Addr &alignedPC, const std::vector<BTBEntry> &btbEnt
  * 2. Stores predictions in the stage prediction structure
  * 3. Handles multiple prediction stages with different delays
  * 
- * @param stream_start Starting PC of the instruction stream
+ * @param startPC Starting PC of the instruction stream
  * @param history Current branch history
  * @param stagePreds Vector of predictions for different pipeline stages
  */
 void
-BTBTAGE::putPCHistory(Addr stream_start, const bitset &history, std::vector<FullBTBPrediction> &stagePreds) {
+BTBTAGE::putPCHistory(Addr startPC, const bitset &history, std::vector<FullBTBPrediction> &stagePreds) {
     // use 32byte(blockSize) aligned PC for prediction(get index and tag)
-    Addr alignedPC = stream_start & ~(blockSize - 1);
+    Addr alignedPC = startPC & ~(blockSize - 1);
 
     // Record prediction bank for next tick's conflict detection
     lastPredBankId = getBankId(alignedPC);
@@ -356,7 +356,7 @@ BTBTAGE::putPCHistory(Addr stream_start, const bitset &history, std::vector<Full
 #endif
 
     DPRINTF(TAGE, "putPCHistory startAddr: %#lx, alignedPC: %#lx, bank: %u\n",
-            stream_start, alignedPC, lastPredBankId);
+            startPC, alignedPC, lastPredBankId);
 
     // IMPORTANT: when this function is called,
     // btb entries should already be in stagePreds
@@ -373,7 +373,7 @@ BTBTAGE::putPCHistory(Addr stream_start, const bitset &history, std::vector<Full
         // TODO: only lookup once for one btb entry in different stages
         auto &stage_pred = stagePreds[s];
         stage_pred.condTakens.clear();
-        lookupHelper(alignedPC, stage_pred.btbEntries, stage_pred.tageInfoForMgscs, stage_pred.condTakens);
+        lookupHelper(startPC, stage_pred.btbEntries, stage_pred.tageInfoForMgscs, stage_pred.condTakens);
     }
 
 }
@@ -437,9 +437,9 @@ BTBTAGE::updatePredictorStateAndCheckAllocation(const BTBEntry &entry,
     auto &alt_info = pred.altInfo;
     bool used_alt = pred.useAlt;
     // Use base table instead of entry.ctr for fallback prediction
-    Addr alignedPC = stream.getRealStartPC() & ~(blockSize - 1);
-    Addr base_idx = getBaseTableIndex(alignedPC);
-    unsigned branch_idx = getBranchIndexInBlock(entry.pc, alignedPC);
+    Addr startPC = stream.getRealStartPC();
+    Addr base_idx = getBaseTableIndex(startPC);
+    unsigned branch_idx = getBranchIndexInBlock(entry.pc, startPC);
     bool base_taken = baseTable[base_idx][branch_idx] >= 0;
     bool alt_taken = alt_info.found ? alt_info.taken() : base_taken;
 
@@ -557,7 +557,7 @@ BTBTAGE::updatePredictorStateAndCheckAllocation(const BTBEntry &entry,
 /**
  * @brief Handle allocation of new entries
  * 
- * @param alignedPC The aligned PC address
+ * @param startPC The starting PC address
  * @param entry The BTB entry being updated
  * @param actual_taken The actual outcome of the branch
  * @param start_table The starting table for allocation
@@ -565,7 +565,7 @@ BTBTAGE::updatePredictorStateAndCheckAllocation(const BTBEntry &entry,
  * @return true if allocation is successful
  */
 bool
-BTBTAGE::handleNewEntryAllocation(const Addr &alignedPC,
+BTBTAGE::handleNewEntryAllocation(const Addr &startPC,
                                  const BTBEntry &entry,
                                  bool actual_taken,
                                  unsigned start_table,
@@ -579,11 +579,11 @@ BTBTAGE::handleNewEntryAllocation(const Addr &alignedPC,
     // - If none, apply a one-step age penalty to a strong, not-useful way (no allocation).
 
     // Calculate branch position within the block (like RTL's cfiPosition)
-    unsigned position = getBranchIndexInBlock(entry.pc, alignedPC);
+    unsigned position = getBranchIndexInBlock(entry.pc, startPC);
 
     for (unsigned ti = start_table; ti < numPredictors; ++ti) {
-        Addr newIndex = getTageIndex(alignedPC, ti, meta->indexFoldedHist[ti].get());
-        Addr newTag = getTageTag(alignedPC, ti,
+        Addr newIndex = getTageIndex(startPC, ti, meta->indexFoldedHist[ti].get());
+        Addr newTag = getTageTag(startPC, ti,
             meta->tagFoldedHist[ti].get(), meta->altTagFoldedHist[ti].get(), position);
 
         auto &set = tageTable[ti][newIndex];
@@ -711,7 +711,7 @@ BTBTAGE::update(const FetchStream &stream) {
         TagePrediction recomputed;
         if (updateOnRead) { // if update on read is enabled, re-read providers using snapshot
             // Re-read providers using snapshot (do not rely on prediction-time main/alt)
-            recomputed = generateSinglePrediction(btb_entry, alignedPC, predMeta);
+            recomputed = generateSinglePrediction(btb_entry, startAddr, predMeta);
         } else { // otherwise, use the prediction from the prediction-time main/alt
             recomputed = predMeta->preds[btb_entry.pc];
         }
@@ -732,7 +732,7 @@ BTBTAGE::update(const FetchStream &stream) {
             if (main_info.found) {
                 start_table = main_info.table + 1; // start from the table after the main prediction table
             }
-            alloc_success = handleNewEntryAllocation(alignedPC, btb_entry, actual_taken,
+            alloc_success = handleNewEntryAllocation(startAddr, btb_entry, actual_taken,
                                    start_table, predMeta, allocated_table, allocated_index, allocated_way);
         }
 
@@ -808,7 +808,7 @@ BTBTAGE::getTageTag(Addr pc, int t, uint64_t foldedHist, uint64_t altFoldedHist,
     Addr mask = (1ULL << tableTagBits[t]) - 1;
 
     // Extract lower bits of PC directly
-    Addr pcBits = (pc >> floorLog2(blockSize)) & mask; // pc is already aligned
+    Addr pcBits = (pc >> floorLog2(blockSize)) & mask;
 
     // Extract and prepare folded history bits
     Addr foldedBits = foldedHist & mask;
@@ -889,9 +889,10 @@ BTBTAGE::getBaseTableIndex(Addr pc) {
 }
 
 unsigned
-BTBTAGE::getBranchIndexInBlock(Addr pc, Addr alignedPC) {
+BTBTAGE::getBranchIndexInBlock(Addr pc, Addr startPC) {
     // Calculate branch position within the 64-byte block (0-31)
     // alignedPC is guaranteed to be 32-byte aligned
+    Addr alignedPC = startPC & ~(blockSize - 1);
     Addr offset = (pc - alignedPC) >> 1;  // Position index 0-31
     assert(offset < maxBranchPositions);
     return offset;
