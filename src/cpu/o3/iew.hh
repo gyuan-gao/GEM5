@@ -41,6 +41,7 @@
 #ifndef __CPU_O3_IEW_HH__
 #define __CPU_O3_IEW_HH__
 
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <queue>
@@ -494,13 +495,8 @@ class IEW
     /** Maximum size of the skid buffer. */
     unsigned skidBufferMax;
 
+    unsigned resolveQueueSize;
     std::vector<ResolveQueueEntry> resolveQueue;
-    static inline bool resolveQueueEntryCompare(const ResolveQueueEntry &a, const ResolveQueueEntry &b)
-    {
-        return a.resolvedFSQId > b.resolvedFSQId;
-    };
-    inline void sortResolveQueue() { std::sort(resolveQueue.begin(), resolveQueue.end(), resolveQueueEntryCompare); };
-
 
     struct IEWStats : public statistics::Group
     {
@@ -534,6 +530,12 @@ class IEW
         statistics::Scalar predictedTakenIncorrect;
         /** Stat for total number of incorrect predicted not taken branches. */
         statistics::Scalar predictedNotTakenIncorrect;
+        /** Stat for total cycles the resolve queue is full. */
+        statistics::Scalar resolveQueueFullCycles;
+        /** Stat for total events of the resolve queue becomes full. */
+        statistics::Scalar resolveQueueFullEvents;
+        /** Stat for total number of enqueue fail events. */
+        statistics::Scalar resolveEnqueueFailEvent;
         /** Stat for total number of mispredicted branches detected at
          *  execute. */
         statistics::Formula branchMispredicts;

@@ -92,6 +92,7 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
       wbWidth(params.wbWidth),
       enableStoreSetTrain(params.enable_storeSet_train),
       numThreads(params.numThreads),
+      resolveQueueSize(params.resolveQueueSize),
       iewStats(cpu)
 {
     if (wbWidth > MaxWidth)
@@ -179,6 +180,13 @@ IEW::IEWStats::IEWStats(CPU *cpu)
              "Number of branches that were predicted taken incorrectly"),
     ADD_STAT(predictedNotTakenIncorrect, statistics::units::Count::get(),
              "Number of branches that were predicted not taken incorrectly"),
+    ADD_STAT(resolveQueueFullCycles, statistics::units::Count::get(),
+             "Number of cycles the resolve queue is full"),
+    ADD_STAT(resolveQueueFullEvents, statistics::units::Count::get(),
+             "Number of events the resolve queue becomes full"),
+    ADD_STAT(resolveEnqueueFailEvent, statistics::units::Count::get(),
+             "Number of times an instruction could not be enqueued to the "
+             "resolve queue"),
     ADD_STAT(branchMispredicts, statistics::units::Count::get(),
              "Number of branch mispredicts detected at execute",
              predictedTakenIncorrect + predictedNotTakenIncorrect),
@@ -1573,11 +1581,21 @@ IEW::SquashCheckAfterExe(DynInstPtr inst)
         }
     }
 
-    if (!found) {
+    if (!found && resolveQueue.size() < resolveQueueSize) {
         ResolveQueueEntry newEntry;
         newEntry.resolvedFSQId = fsqId;
         newEntry.resolvedInstPC.push_back(pc);
         resolveQueue.push_back(newEntry);
+        if (resolveQueue.size() == resolveQueueSize) {
+            iewStats.resolveQueueFullEvents++;
+        }
+    }
+
+    if (resolveQueue.size() >= resolveQueueSize) {
+        if (!found) {
+            iewStats.resolveEnqueueFailEvent++;
+        }
+        iewStats.resolveQueueFullCycles++;
     }
 
     if (!fetchRedirect[tid] ||
@@ -1793,10 +1811,9 @@ IEW::executeInsts()
         }
     }
 
-    sortResolveQueue();
     if (!resolveQueue.empty()) {
-        ResolveQueueEntry entry = resolveQueue.back();
-        resolveQueue.pop_back();
+        ResolveQueueEntry entry = resolveQueue.front();
+        resolveQueue.erase(resolveQueue.begin());
         toFetch->iewInfo[tid].resolveQueue.push_back(entry);
     }
 
