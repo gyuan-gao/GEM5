@@ -248,20 +248,21 @@ void verifyTageEntries(BTBTAGE* tage, Addr pc, const std::vector<int>& expected_
 }
 
 /**
- * @brief Find the table with a valid entry for a given PC
+ * @brief Find the table with a valid entry for a given fetch block and branch
  *
  * @param tage The TAGE predictor
- * @param pc Branch instruction address to check
+ * @param startPC Fetch-block start address used during prediction
+ * @param branchPC Branch instruction address being searched
  * @return int Index of the table with valid entry (-1 if not found)
  */
-int findTableWithEntry(BTBTAGE* tage, Addr pc) {
+int findTableWithEntry(BTBTAGE* tage, Addr startPC, Addr branchPC) {
     auto meta = std::static_pointer_cast<BTBTAGE::TageMeta>(tage->getPredictionMeta());
     // use meta to find the table, predicted info
     for (int t = 0; t < tage->numPredictors; t++) {
-        Addr index = tage->getTageIndex(pc, t, meta->indexFoldedHist[t].get());
+        Addr index = tage->getTageIndex(startPC, t, meta->indexFoldedHist[t].get());
         for (int way = 0; way < tage->numWays; way++) {
             auto &entry = tage->tageTable[t][index][way];
-            if (entry.valid && entry.pc == pc) {
+            if (entry.valid && entry.pc == branchPC) {
                 return t;
             }
         }
@@ -300,7 +301,7 @@ TEST_F(BTBTAGETest, BasicPrediction) {
     predictUpdateCycle(tage, 0x1000, entry, false, history, stagePreds);
 
     // Verify at least one table has an entry allocated
-    int table = findTableWithEntry(tage, 0x1000);
+    int table = findTableWithEntry(tage, 0x1000, 0x1000);
     EXPECT_GE(table, 0) << "No TAGE table entry was allocated";
 }
 
@@ -529,8 +530,8 @@ TEST_F(BTBTAGETest, MultipleBranchSequence) {
     tage->update(stream2);
 
     // Verify both branches have entries allocated
-    EXPECT_EQ(findTableWithEntry(tage, 0x1000), -1) << "First branch should not have an entry";
-    EXPECT_GE(findTableWithEntry(tage, 0x1004), 0) << "Second branch should have an entry";
+    EXPECT_EQ(findTableWithEntry(tage, 0x1000, 0x1000), -1) << "First branch should not have an entry";
+    EXPECT_GE(findTableWithEntry(tage, 0x1000, 0x1004), 0) << "Second branch should have an entry";
 }
 
 // Test counter update mechanism
@@ -883,9 +884,9 @@ TEST_F(BTBTAGETest, BankConflict) {
     boost::dynamic_bitset<> testHistory(128);
     std::vector<FullBTBPrediction> testStagePreds(5);
 
-    // Bank ID: pc[6:5] for 32B blocks
-    // Bank 0: 0x0, 0x80, 0x100...  Bank 1: 0x20, 0xa0, 0x120...
-    // Bank 2: 0x40, 0xc0, 0x140... Bank 3: 0x60, 0xe0, 0x160...
+    // Bank ID derives from bits [2:1] (pc >> 1) & 0x3 when instShiftAmt == 1.
+    // Bank 0: ..., 0x100, 0x108 ...  Bank 1: ..., 0x102, 0x10A ...
+    // Bank 2: ..., 0x104, 0x10C ...  Bank 3: ..., 0x106, 0x10E ...
 
     // Test 1: Same bank conflict (enabled)
     bankTage->enableBankConflict = true;
@@ -909,12 +910,12 @@ TEST_F(BTBTAGETest, BankConflict) {
 
     // Test 2: Different bank, no conflict
     {
-        // Predict on bank 0 (0x100), update on bank 2 (0x140)
+        // Predict on bank 0 (0x100), update on bank 2 (0x104)
         testStagePreds[1].btbEntries = {createBTBEntry(0x100)};
         bankTage->putPCHistory(0x100, testHistory, testStagePreds);
 
         auto meta = bankTage->getPredictionMeta();
-        FetchStream stream = createStream(0x140, createBTBEntry(0x140), true, meta);
+        FetchStream stream = createStream(0x104, createBTBEntry(0x104), true, meta);
 
         uint64_t conflicts_before = bankTage->tageStats.updateBankConflict;
         bankTage->update(stream);
