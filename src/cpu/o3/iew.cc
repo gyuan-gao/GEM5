@@ -92,6 +92,7 @@ IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
       wbWidth(params.wbWidth),
       enableStoreSetTrain(params.enable_storeSet_train),
       numThreads(params.numThreads),
+      resolveQueueSize(params.resolveQueueSize),
       iewStats(cpu)
 {
     if (wbWidth > MaxWidth)
@@ -1575,15 +1576,13 @@ IEW::SquashCheckAfterExe(DynInstPtr inst)
         }
     }
 
-    int resolveQueueMax = 16;
-
-    if (!found && resolveQueue.size() < resolveQueueMax) {
+    if (!found && resolveQueue.size() < resolveQueueSize) {
         ResolveQueueEntry newEntry;
         newEntry.resolvedFSQId = fsqId;
         newEntry.resolvedInstPC.push_back(pc);
         resolveQueue.push_back(newEntry);
     }
-    if (resolveQueue.size() >= resolveQueueMax) {
+    if (resolveQueue.size() >= resolveQueueSize) {
         iewStats.resolveQueueFull++;
     }
 

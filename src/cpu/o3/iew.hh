@@ -41,6 +41,7 @@
 #ifndef __CPU_O3_IEW_HH__
 #define __CPU_O3_IEW_HH__
 
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <queue>
@@ -494,6 +495,7 @@ class IEW
     /** Maximum size of the skid buffer. */
     unsigned skidBufferMax;
 
+    unsigned resolveQueueSize;
     std::vector<ResolveQueueEntry> resolveQueue;
 
     struct IEWStats : public statistics::Group
