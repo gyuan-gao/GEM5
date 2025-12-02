@@ -180,8 +180,13 @@ IEW::IEWStats::IEWStats(CPU *cpu)
              "Number of branches that were predicted taken incorrectly"),
     ADD_STAT(predictedNotTakenIncorrect, statistics::units::Count::get(),
              "Number of branches that were predicted not taken incorrectly"),
-    ADD_STAT(resolveQueueFull, statistics::units::Count::get(),
-             "Number of times the resolve queue has become full"),
+    ADD_STAT(resolveQueueFullCycles, statistics::units::Count::get(),
+             "Number of cycles the resolve queue is full"),
+    ADD_STAT(resolveQueueFullEvents, statistics::units::Count::get(),
+             "Number of events the resolve queue becomes full"),
+    ADD_STAT(resolveEnqueueFailEvent, statistics::units::Count::get(),
+             "Number of times an instruction could not be enqueued to the "
+             "resolve queue"),
     ADD_STAT(branchMispredicts, statistics::units::Count::get(),
              "Number of branch mispredicts detected at execute",
              predictedTakenIncorrect + predictedNotTakenIncorrect),
@@ -1581,9 +1586,16 @@ IEW::SquashCheckAfterExe(DynInstPtr inst)
         newEntry.resolvedFSQId = fsqId;
         newEntry.resolvedInstPC.push_back(pc);
         resolveQueue.push_back(newEntry);
+        if (resolveQueue.size() == resolveQueueSize) {
+            iewStats.resolveQueueFullEvents++;
+        }
     }
+
     if (resolveQueue.size() >= resolveQueueSize) {
-        iewStats.resolveQueueFull++;
+        if (!found) {
+            iewStats.resolveEnqueueFailEvent++;
+        }
+        iewStats.resolveQueueFullCycles++;
     }
 
     if (!fetchRedirect[tid] ||

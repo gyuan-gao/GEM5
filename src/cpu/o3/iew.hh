@@ -530,8 +530,12 @@ class IEW
         statistics::Scalar predictedTakenIncorrect;
         /** Stat for total number of incorrect predicted not taken branches. */
         statistics::Scalar predictedNotTakenIncorrect;
-        /** Stat for total number of times the resolve queue becomes full. */
-        statistics::Scalar resolveQueueFull;
+        /** Stat for total cycles the resolve queue is full. */
+        statistics::Scalar resolveQueueFullCycles;
+        /** Stat for total events of the resolve queue becomes full. */
+        statistics::Scalar resolveQueueFullEvents;
+        /** Stat for total number of enqueue fail events. */
+        statistics::Scalar resolveEnqueueFailEvent;
         /** Stat for total number of mispredicted branches detected at
          *  execute. */
         statistics::Formula branchMispredicts;
