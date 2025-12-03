@@ -176,11 +176,16 @@ class AheadBTB : public TimedBaseBTBPredictor
     void update(const FetchStream &stream) override;
 
 
+
     void printBTBEntry(const BTBEntry &e, uint64_t tick = 0) {
         DPRINTF(BTB, "BTB entry: valid %d, pc:%#lx, tag: %#lx, size:%d, target:%#lx, \
             cond:%d, indirect:%d, call:%d, return:%d, always_taken:%d, tick:%lu\n",
             e.valid, e.pc, e.tag, e.size, e.target, e.isCond, e.isIndirect, e.isCall, e.isReturn, e.alwaysTaken, tick);
     }
+
+    std::vector<BTBEntry> collectEntriesToUpdateFromS3Pred(
+        const std::vector<BTBEntry>& old_entries,
+        FullBTBPrediction &s3Pred);
 
     void printTickedBTBEntry(const TickedBTBEntry &e) {
         printBTBEntry(e, e.tick);
@@ -208,6 +213,7 @@ class AheadBTB : public TimedBaseBTBPredictor
     }
 
 
+    void updateUsingS3Pred(FullBTBPrediction &s3Pred, const Addr previousPC);
 
   private:
     /** Returns the index into the BTB, based on the branch's PC.
@@ -247,7 +253,8 @@ class AheadBTB : public TimedBaseBTBPredictor
         if (!taken && ctr > -2) {ctr--;}
     }
 
-    typedef struct BTBMeta {
+        typedef struct BTBMeta
+    {
         std::vector<BTBEntry> hit_entries;  // hit entries in L1 BTB
         std::vector<BTBEntry> l0_hit_entries; // hit entries in L0 BTB
         BTBMeta() {
@@ -258,6 +265,14 @@ class AheadBTB : public TimedBaseBTBPredictor
     }BTBMeta;
 
     std::shared_ptr<BTBMeta> meta; // metadata for BTB, set in putPCHistory, used in update
+
+    /**
+    * lastPredEntries is using in updateusingS3pred() to store the hit entries during prediction
+    * it is using to hold the hit entries for later use in S3 update
+    * because in gem5 generat pred and updateusingS3pred finish in the same cycle
+    * so we can use this instead of using BTBMeta
+    */
+    std::vector<BTBEntry> lastPredEntries; // cached hit entries for the latest prediction
 
     /** Process BTB entries for prediction
      *  @param entries Vector of BTB entries to process
@@ -281,10 +296,12 @@ class AheadBTB : public TimedBaseBTBPredictor
                                std::vector<FullBTBPrediction>& stagePreds);
 
     /** Process prediction metadata and old entries
-     *  @param stream Fetch stream containing prediction info
+     *  @param meta BTB metadata from prediction
+     *  @param end_inst_pc End PC of the executed instructions
      *  @return Processed old BTB entries
      */
-    std::vector<BTBEntry> processOldEntries(const FetchStream &stream);
+    std::vector<BTBEntry> processOldEntries(const std::vector<BTBEntry>& hit_entries,
+                                            Addr end_inst_pc);
 
     /** Get the previous PC from the fetch stream
      *  @param stream Fetch stream containing prediction info
@@ -314,7 +331,8 @@ class AheadBTB : public TimedBaseBTBPredictor
      *  @param entry Entry to update/replace
      *  @param stream Fetch stream with update info
      */
-    void updateBTBEntry(Addr btb_idx, Addr btb_tag, const BTBEntry& entry, const FetchStream &stream);
+    void updateBTBEntry(Addr btb_idx, Addr btb_tag, const BTBEntry& entry,
+                                    const BranchInfo takenbranchinfo,const bool isTaken);
 
     /*
      * Comparator for MRU heap
@@ -392,6 +410,7 @@ class AheadBTB : public TimedBaseBTBPredictor
     /** Address calculation masks and shifts */
     Addr idxMask;          // Mask for extracting index bits
     unsigned tagBits;      // Number of tag bits
+    bool usingS3Pred;   // Whether to use S3 prediction for update
     Addr tagMask;          // Mask for extracting tag bits
     unsigned idxShiftAmt;  // Amount to shift PC for index
     unsigned tagShiftAmt;  // Amount to shift PC for tag
