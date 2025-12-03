@@ -100,9 +100,14 @@ class BTBITTAGE : public TimedBaseBTBPredictor
 
     std::shared_ptr<void> getPredictionMeta() override;
 
-    void specUpdateHist(const boost::dynamic_bitset<> &history, FullBTBPrediction &pred) override;
+    // speculative update 3 folded history, according history and pred.taken
+    // the other specUpdateHist methods are left blank
+    void specUpdatePHist(const boost::dynamic_bitset<> &history, FullBTBPrediction &pred) override;
 
-    void recoverHist(const boost::dynamic_bitset<> &history, const FetchStream &entry, int shamt, bool cond_taken) override;
+    // Recover 3 folded history after a misprediction, then update 3 folded history according to history and pred.taken
+    // the other recoverHist methods are left blank
+    void recoverPHist(const boost::dynamic_bitset<> &history,
+                        const FetchStream &entry,int shamt, bool cond_taken) override;
 
     void update(const FetchStream &entry) override;
 
@@ -132,7 +137,9 @@ class BTBITTAGE : public TimedBaseBTBPredictor
         return (pc & (blockSize - 1)) >> 1;
     }
 
-    void doUpdateHist(const bitset &history, int shamt, bool taken);
+    // Update branch history
+    void doUpdateHist(const bitset &history, bool taken, Addr pc, Addr target);
+
 
     const unsigned numPredictors;
 
@@ -144,9 +151,9 @@ class BTBITTAGE : public TimedBaseBTBPredictor
     std::vector<bitset> tableTagMasks;
     std::vector<unsigned> tablePcShifts;
     std::vector<unsigned> histLengths;
-    std::vector<GlobalFoldedHist> tagFoldedHist;
-    std::vector<GlobalFoldedHist> altTagFoldedHist;
-    std::vector<GlobalFoldedHist> indexFoldedHist;
+    std::vector<PathFoldedHist> tagFoldedHist;
+    std::vector<PathFoldedHist> altTagFoldedHist;
+    std::vector<PathFoldedHist> indexFoldedHist;
 
     LFSR64 allocLFSR;
 
@@ -218,12 +225,12 @@ class BTBITTAGE : public TimedBaseBTBPredictor
     {
         std::unordered_map<Addr, TagePrediction> preds;
         bitset usefulMask;
-        std::vector<GlobalFoldedHist> tagFoldedHist;
-        std::vector<GlobalFoldedHist> altTagFoldedHist;
-        std::vector<GlobalFoldedHist> indexFoldedHist;
+        std::vector<PathFoldedHist> tagFoldedHist;
+        std::vector<PathFoldedHist> altTagFoldedHist;
+        std::vector<PathFoldedHist> indexFoldedHist;
         TageMeta(std::unordered_map<Addr, TagePrediction> preds, bitset usefulMask,
-                 std::vector<GlobalFoldedHist> tagFoldedHist, std::vector<GlobalFoldedHist> altTagFoldedHist,
-                 std::vector<GlobalFoldedHist> indexFoldedHist)
+                 std::vector<PathFoldedHist> tagFoldedHist, std::vector<PathFoldedHist> altTagFoldedHist,
+                 std::vector<PathFoldedHist> indexFoldedHist)
             : preds(preds),
               usefulMask(usefulMask),
               tagFoldedHist(tagFoldedHist),
