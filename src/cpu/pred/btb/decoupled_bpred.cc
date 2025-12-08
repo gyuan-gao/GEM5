@@ -675,6 +675,10 @@ DecoupledBPUWithBTB::markCFIResolved(unsigned &stream_id, uint64_t resolvedInstP
     }
     auto &stream = stream_it->second;
 
+    if (stream.updateNewBTBEntry.pc == resolvedInstPC) {
+        stream.updateNewBTBEntry.resolved = true;
+    }
+
     stream.markBTBEntryResolved(resolvedInstPC);
 }
 
