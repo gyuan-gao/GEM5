@@ -286,6 +286,9 @@ class UBTB : public TimedBaseBTBPredictor
         statistics::Scalar predMiss;
         statistics::Scalar predHit;
         statistics::Scalar updateMiss;
+        statistics::Scalar updateHit;
+        statistics::Scalar s3UpdateHits;
+        statistics::Scalar s3UpdateMisses;
 
         // per branch statistics
         statistics::Scalar allBranchHits;

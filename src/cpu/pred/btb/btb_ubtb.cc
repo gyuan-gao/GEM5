@@ -200,14 +200,20 @@ UBTB::replaceOldEntry(UBTBIter oldEntryIter, const BTBEntry &newTakenEntry, Addr
 void
 UBTB::updateUsingS3Pred(FullBTBPrediction &s3Pred)
 {
-    if (usingS3Pred) {
-        auto takenEntry = s3Pred.getTakenEntry();
-        auto startAddr = s3Pred.bbStart;
-        UBTBIter oldEntryIter = lastPred.hit_entry;
-        updateNewEntry(oldEntryIter, takenEntry, startAddr);
-    } else {
-        //using commit result to update ubtb
+    if (!usingS3Pred) {
+        return;
     }
+
+    auto takenEntry = s3Pred.getTakenEntry();
+    if (takenEntry.valid) {
+        ubtbStats.s3UpdateHits++;
+    }else {
+        ubtbStats.s3UpdateMisses++;
+    }
+    auto startAddr = s3Pred.bbStart;
+    UBTBIter oldEntryIter = lastPred.hit_entry;
+    updateNewEntry(oldEntryIter, takenEntry, startAddr);
+
 }
 
 
@@ -300,6 +306,8 @@ UBTB::update(const FetchStream &stream)
         if (!pred_hit_entry.valid || pred_hit_entry != stream.exeBranchInfo) {
             DPRINTF(UBTB, "update miss detected, pc %#lx, predTick %lu\n", stream.exeBranchInfo.pc, stream.predTick);
             ubtbStats.updateMiss++;
+        }else {
+            ubtbStats.updateHit++;
         }
     }
 
@@ -407,7 +415,9 @@ UBTB::UBTBStats::UBTBStats(statistics::Group *parent)
       ADD_STAT(predMiss, statistics::units::Count::get(), "misses encountered on prediction"),
       ADD_STAT(predHit, statistics::units::Count::get(), "hits encountered on prediction"),
       ADD_STAT(updateMiss, statistics::units::Count::get(), "misses encountered on update"),
-
+      ADD_STAT(updateHit, statistics::units::Count::get(), "hits encountered on update"),
+      ADD_STAT(s3UpdateHits, statistics::units::Count::get(), "hits encountered on S3 update"),
+      ADD_STAT(s3UpdateMisses, statistics::units::Count::get(), "misses encountered on S3 update"),
 
       ADD_STAT(allBranchHits, statistics::units::Count::get(),
                "all types of branches committed that was predicted hit"),
