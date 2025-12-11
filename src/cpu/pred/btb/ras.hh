@@ -212,6 +212,32 @@ namespace btb_pred {
 
         std::shared_ptr<RASMeta> meta;
 
+#ifdef UNIT_TEST
+    typedef uint64_t Scalar;
+#else
+    typedef statistics::Scalar Scalar;
+#endif
+
+#ifdef UNIT_TEST
+        struct RASStats
+        {
+#else
+    struct RASStats : public statistics::Group
+    {
+#endif
+        Scalar PredWrong;
+        Scalar MispredWithSctr;
+        Scalar PredCorrect;
+        Scalar CorrectWithSctr;
+
+        Scalar Pushes;
+        Scalar Pops;
+
+#ifndef UNIT_TEST
+        RASStats(statistics::Group* parent);
+#endif
+        } rasStats;
+
 
 }; // class BTBRAS
 

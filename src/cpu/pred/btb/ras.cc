@@ -51,7 +51,8 @@ namespace btb_pred {
         : TimedBaseBTBPredictor(p),
           numEntries(p.numEntries),
           ctrWidth(p.ctrWidth),
-          numInflightEntries(p.numInflightEntries)
+        numInflightEntries(p.numInflightEntries),
+        rasStats(this)
     {
         // Initialize RAS state
         ssp = 0;
@@ -238,6 +239,7 @@ BTBRAS::push_stack(Addr retAddr)
 void
 BTBRAS::push(Addr retAddr)
 {
+    rasStats.Pushes++;
     DPRINTF(RAS, "doing push ");
     // update ssp and sctr first
     // meta has recorded their old value
@@ -281,7 +283,7 @@ void
 BTBRAS::pop()
 {
     // DPRINTFR(RAS, "doing pop ndepth = %d", ndepth);
-
+    rasStats.Pops++;
     // pop may need to deal with committed stack
     if (inflightInRange(TOSR)) {
         DPRINTF(RAS, "Select from inflight, addr %lx\n", inflightStack[TOSR].data.retAddr);
@@ -423,11 +425,6 @@ BTBRAS::getTop_meta() {
     }
 }
 
-void
-BTBRAS::commitBranch(const FetchStream &stream, const DynInstPtr &inst)
-{
-}
-
 Addr
 BTBRAS::getTopAddrFromMetas(const FetchStream &stream)
 {
@@ -435,6 +432,42 @@ BTBRAS::getTopAddrFromMetas(const FetchStream &stream)
     return meta_ptr->target;
 }
 
+void
+BTBRAS::commitBranch(const FetchStream &stream, const DynInstPtr &inst)
+{
+    if (!inst->isReturn() || inst->isNop()) {
+        // ras only cares about return instructions
+        return;
+    }
+    auto meta = std::static_pointer_cast<RASMeta>(stream.predMetas[getComponentIdx()]);
+    auto npc = inst->getNPC();
+    if (npc != meta->target) {
+        rasStats.PredWrong++;
+        if (meta->sctr) {
+            rasStats.MispredWithSctr++;
+        }
+    } else {
+        rasStats.PredCorrect++;
+        if (meta->sctr) {
+            rasStats.CorrectWithSctr++;
+        }
+    }
+}
+
+#ifndef UNIT_TEST
+BTBRAS::RASStats::RASStats(statistics::Group *parent):
+    statistics::Group(parent),
+    ADD_STAT(PredWrong, statistics::units::Count::get(),"number of RAS mispredictions"),
+    ADD_STAT(MispredWithSctr, statistics::units::Count::get(),"number of RAS mispredictions when sctr > 0"),
+    ADD_STAT(PredCorrect, statistics::units::Count::get(),"number of RAS correct predictions"),
+    ADD_STAT(CorrectWithSctr, statistics::units::Count::get(),"number of RAS correct predictions when sctr > 0"),
+
+    ADD_STAT(Pushes, statistics::units::Count::get(),"number of RAS pushes"),
+    ADD_STAT(Pops, statistics::units::Count::get(),"number of RAS pops")
+
+{}
+
+#endif
 // Close conditional namespaces
 #ifdef UNIT_TEST
     } // namespace test
