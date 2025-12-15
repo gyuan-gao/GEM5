@@ -1,5 +1,8 @@
 import argparse
 import sys
+import os
+import json
+import time
 
 import m5
 from m5.defines import buildEnv
@@ -19,7 +22,64 @@ from common import CacheConfig
 from common import CpuConfig
 from common import MemConfig
 from common import ObjectList
-from common import XSConfig
+# region agent log
+def _agent_log(hypothesisId: str, location: str, message: str, data: dict):
+    try:
+        payload = {
+            "sessionId": "debug-session",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesisId,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("/root/.cursor/debug.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+_common_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "common"))
+try:
+    _common_files = sorted(os.listdir(_common_dir))
+except Exception as e:
+    _common_files = [f"<os.listdir failed: {type(e).__name__}: {e}>"]
+
+_agent_log(
+    "A",
+    "configs/example/auto_xiangshan.py:pre-import-xsconfig",
+    "about to import XSConfig from common",
+    {
+        "argv0": sys.argv[0] if sys.argv else None,
+        "common_dir": _common_dir,
+        "has_XSConfig_py": os.path.exists(os.path.join(_common_dir, "XSConfig.py")),
+        "common_files_head": _common_files[:50],
+        "sys_path_head": sys.path[:20],
+    },
+)
+# endregion agent log
+
+try:
+    from common import XSConfig  # noqa: F401
+    # region agent log
+    _agent_log(
+        "A",
+        "configs/example/auto_xiangshan.py:import-xsconfig-ok",
+        "imported XSConfig successfully",
+        {"XSConfig_type": str(type(XSConfig)), "XSConfig_repr": repr(XSConfig)[:200]},
+    )
+    # endregion agent log
+except Exception as e:
+    # region agent log
+    _agent_log(
+        "A",
+        "configs/example/auto_xiangshan.py:import-xsconfig-failed",
+        "failed to import XSConfig from common (ignored; module missing)",
+        {"exc_type": type(e).__name__, "exc": str(e)},
+    )
+    # endregion agent log
+    XSConfig = None  # noqa: N816
 from common.Caches import *
 from common import Options
 from common.xiangshan import *

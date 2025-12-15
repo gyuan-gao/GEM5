@@ -19,7 +19,42 @@ from common import CacheConfig
 from common import CpuConfig
 from common import MemConfig
 from common import ObjectList
-from common import XSConfig
+# region agent log
+def _agent_log(hypothesisId: str, location: str, message: str, data: dict):
+    try:
+        import json, time
+        payload = {
+            "sessionId": "debug-session",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesisId,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("/root/.cursor/debug.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+try:
+    from common import XSConfig  # noqa: F401
+    _agent_log(
+        "A",
+        "configs/example/cliff.py:import-xsconfig-ok",
+        "imported XSConfig successfully",
+        {},
+    )
+except Exception as e:
+    _agent_log(
+        "A",
+        "configs/example/cliff.py:import-xsconfig-failed",
+        "failed to import XSConfig from common (ignored; module missing)",
+        {"exc_type": type(e).__name__, "exc": str(e)},
+    )
+    XSConfig = None  # noqa: N816
+# endregion agent log
 from common.Caches import *
 from common import Options
 from common.xiangshan import *

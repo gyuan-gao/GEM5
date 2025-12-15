@@ -345,6 +345,16 @@ def config_embedded_python(env):
 
     env.ParseConfig(cmd, flag_filter)
 
+    # If we're building inside a conda env, ensure the embedded Python shared
+    # library can be found at *runtime* when Configure runs conftests.
+    # (We already get -L from python-config, but the dynamic loader won't
+    # search that path unless it is in RPATH/RUNPATH or LD_LIBRARY_PATH.)
+    conda_prefix = os.environ.get("CONDA_PREFIX") if 'os' in globals() else None
+    conda_lib = (os.path.join(conda_prefix, "lib")
+                 if conda_prefix else None)
+    if conda_lib and os.path.isdir(conda_lib):
+        env.AppendUnique(RPATH=[conda_lib])
+
     env.Prepend(CPPPATH=Dir('ext/pybind11/include/'))
 
     with gem5_scons.Configure(env) as conf:

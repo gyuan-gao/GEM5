@@ -33,3 +33,34 @@
 # (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+# region agent log
+def _agent_log(hypothesisId: str, location: str, message: str, data: dict):
+    try:
+        import json, time
+        payload = {
+            "sessionId": "debug-session",
+            "runId": "pre-fix",
+            "hypothesisId": hypothesisId,
+            "location": location,
+            "message": message,
+            "data": data,
+            "timestamp": int(time.time() * 1000),
+        }
+        with open("/root/.cursor/debug.log", "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
+
+_agent_log(
+    "E",
+    "configs/common/__init__.py:loaded",
+    "common package __init__ executed",
+    {
+        "__file__": __file__,
+        "has_XSConfig_attr": "XSConfig" in globals(),
+        "globals_keys_head": sorted(list(globals().keys()))[:40],
+    },
+)
+# endregion agent log
+
