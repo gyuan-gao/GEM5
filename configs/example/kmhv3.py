@@ -136,9 +136,9 @@ def setKmhV3Params(args, system):
             system.tol2bus_list[i].response_latency = 3  # 3->0
             system.tol2bus_list[i].hint_wakeup_ahead_cycles = 1  # 1->0
 
-            # Enable dual-port for DCache → L2 communication
-            # ReqLayer[0]: ICache+DCache+ITB+DTB → L2, allow 2 requests per cycle
-            # RespLayer[1]: L2 → DCache, allow 2 responses per cycle
+            # Enable dual-port for DCache -> L2 communication
+            # ReqLayer[0]: ICache+DCache+ITB+DTB -> L2, allow 2 requests per cycle
+            # RespLayer[1]: L2 -> DCache, allow 2 responses per cycle
             # system.tol2bus_list[i].layer_bandwidth_configs = [
             #     LayerBandwidthConfig(direction="req", port_index=0, max_per_cycle=2),
             #     LayerBandwidthConfig(direction="resp", port_index=1, max_per_cycle=2),
@@ -153,8 +153,14 @@ def setKmhV3Params(args, system):
 if __name__ == '__m5_main__':
     FutureClass = None
 
+    
+
+
     args = xiangshan_system_init()
 
+    args.enable_difftest = False
+    args.raw_cpt = True
+    args.no_pf = True
     assert not args.external_memory_system
 
     # Set default bp_type based on ideal_kmhv3 flag

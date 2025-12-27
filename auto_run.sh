@@ -11,7 +11,7 @@ set -e  # 遇到错误立即退出
 GEM5_HOME="/gem5"
 export NEMU_HOME="/gem5/nemu"
 SPEC_FILE="${GEM5_HOME}/ext/xs_env/gem5-py38.txt"
-CONFIG_FILE="${GEM5_HOME}/configs/example/xiangshan.py"
+CONFIG_FILE="${GEM5_HOME}/configs/example/kmhv3.py"
 BINARY="${GEM5_HOME}/ready-to-run/coremark-2-iteration.bin"
 BUILD_TARGET="build/RISCV/gem5.opt"
 
