@@ -9,6 +9,7 @@ set -e  # 遇到错误立即退出
 
 # 环境变量（可根据实际情况调整）
 GEM5_HOME="/gem5"
+export NEMU_HOME="/gem5/nemu"
 SPEC_FILE="${GEM5_HOME}/ext/xs_env/gem5-py38.txt"
 CONFIG_FILE="${GEM5_HOME}/configs/example/xiangshan.py"
 BINARY="${GEM5_HOME}/ready-to-run/coremark-2-iteration.bin"
@@ -44,6 +45,10 @@ if $FIRST_RUN; then
 
     echo "=== 激活 py38 环境 ==="
     conda activate py38
+    echo "=== 编译nemu ==="
+    cd /gem5/nemu
+    make riscv64-xs_defconfig
+    make -j$(nproc)
 else
     echo "=== 非首次执行：激活已有 py38 环境 ==="
     if ! conda env list | grep -q "py38"; then
@@ -70,5 +75,7 @@ if [[ ! -f "$BINARY" ]]; then
 fi
 
 ./"${BUILD_TARGET}" "${CONFIG_FILE}" --raw-cpt --generic-rv-cpt="${BINARY}"
+
+
 
 echo "=== 所有步骤完成 ==="

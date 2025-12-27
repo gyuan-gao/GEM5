@@ -51,7 +51,6 @@ run_fs.sh
 llvm-pgo/
 *.profdata
 *.profraw
-*nemu*
 ready-to-run/
 *.out
 .cursorrules

@@ -32,9 +32,15 @@ RUN apt-get update && \
         libsqlite3-dev \
         zstd \
         libzstd-dev \
-        wget && \
-    rm -rf /var/lib/apt/lists/*
-
+        wget \
+        man \
+        gcc \
+        gdb \
+        bison \
+        flex \
+        libreadline-dev \
+        libsdl2-dev && \
+        rm -rf /var/lib/apt/lists/*
 # 安装 Miniconda
 ENV MINICONDA_HOME=/opt/miniconda3
 ENV PATH="${MINICONDA_HOME}/bin:${PATH}"
