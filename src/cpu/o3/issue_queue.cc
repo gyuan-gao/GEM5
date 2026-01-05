@@ -205,6 +205,7 @@ IssueQue::IssueQue(const IssueQueParams& params)
     intRdRfTPI.resize(outports);
     fpRdRfTPI.resize(outports);
     intWrRfTPI.resize(outports);
+    fpWrRfTPI.resize(outports);
 
     readyQs.resize(outports, nullptr);
 
@@ -230,6 +231,8 @@ IssueQue::IssueQue(const IssueQueParams& params)
             if (is_wr) {
                 if (rf_type == RF_INTID) {
                     intWrRfTPI[i].push_back(rf_typeportid_pair);
+                } else if (rf_type == RF_FPID) {
+                    fpWrRfTPI[i].push_back(rf_typeportid_pair);
                 } else {
                     panic("%s: Unknown write RF type %d\n", iqname, rf_type);
                 }
@@ -551,6 +554,9 @@ IssueQue::selectInst()
                     if (pdst->isIntReg() && intWrRfTPI[pi].size() > i) {
                         rfTypePortId = intWrRfTPI[pi][i];
                         scheduler->useRfWrPort(inst, pdst, rfTypePortId.first, rfTypePortId.second);
+                    } else if (pdst->isFloatReg() && fpWrRfTPI[pi].size() > i) {
+                        rfTypePortId = fpWrRfTPI[pi][i];
+                        scheduler->useRfWrPort(inst, pdst, rfTypePortId.first, rfTypePortId.second);
                     }
                 }
 
@@ -857,6 +863,12 @@ Scheduler::Scheduler(const SchedulerParams& params)
 
         // write port check
         for (auto& rfTypePortId : issueQues[i]->intWrRfTPI) {
+            for (auto& typePortId : rfTypePortId) {
+                maxWrTypePortId = std::max(maxWrTypePortId, typePortId.first);
+                wrRfportChecker[typePortId.first] += 1;
+            }
+        }
+        for (auto& rfTypePortId : issueQues[i]->fpWrRfTPI) {
             for (auto& typePortId : rfTypePortId) {
                 maxWrTypePortId = std::max(maxWrTypePortId, typePortId.first);
                 wrRfportChecker[typePortId.first] += 1;

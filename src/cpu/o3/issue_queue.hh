@@ -147,6 +147,7 @@ class IssueQue : public SimObject
     std::vector<std::vector<std::pair<int, int>>> fpRdRfTPI;
 
     std::vector<std::vector<std::pair<int, int>>> intWrRfTPI;
+    std::vector<std::vector<std::pair<int, int>>> fpWrRfTPI;
 
     std::vector<int64_t> portBusy;
 

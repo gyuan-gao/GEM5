@@ -42,6 +42,8 @@
 #ifndef __CPU_O3_RENAME_HH__
 #define __CPU_O3_RENAME_HH__
 
+#include <cstdint>
+#include <array>
 #include <list>
 #include <utility>
 
@@ -261,8 +263,17 @@ class Rename
     /** Executes actual squash, removing squashed instructions. */
     void doSquash(const InstSeqNum &squash_seq_num, ThreadID tid);
 
-    /** Removes a committed instruction's rename history. */
-    void removeFromHistory(InstSeqNum inst_seq_num, ThreadID tid);
+    struct ReleaseBudgets
+    {
+        unsigned intBudget;
+        unsigned fpBudget;
+        unsigned vecBudget;
+        unsigned otherBudget;
+    };
+
+    /** Release committed rename histories, per class, up to committed_seq. */
+    bool releaseCommittedHistory(ThreadID tid, InstSeqNum committed_seq,
+                                 ReleaseBudgets &budgets);
 
     /** Renames the source registers of an instruction. */
     void renameSrcRegs(const DynInstPtr &inst, ThreadID tid);
@@ -334,11 +345,34 @@ class Rename
     /** A per-thread list of all destination register renames, used to either
      * undo rename mappings or free old physical registers.
      */
-    std::list<RenameHistory> historyBuffer[MaxThreads];
+    enum class HistClass : uint8_t
+    {
+        Int = 0,
+        Fp,
+        Vec,
+        Other,
+        NumClasses
+    };
 
-    InstSeqNum finalCommitSeq = 0;
+    static constexpr size_t NumHistClasses =
+        static_cast<size_t>(HistClass::NumClasses);
 
-    InstSeqNum releaseSeq = 0;
+    /** Per-thread, per-class rename histories. */
+    std::array<std::list<RenameHistory>, NumHistClasses>
+        historyBuffer[MaxThreads];
+
+    /** Tracks, per-thread, the latest committed instruction sequence number. */
+    InstSeqNum committedSeq[MaxThreads] = {};
+
+    /** Per-cycle committed-history release widths (pop counts). */
+    unsigned releaseWidthInt = 0;
+    unsigned releaseWidthFp = 0;
+    unsigned releaseWidthVec = 0;
+    unsigned releaseWidthOther = 0;
+
+    static HistClass histClassFromRegClass(RegClassType reg_class);
+    std::list<RenameHistory> &getHistoryBuffer(ThreadID tid,
+                                               RegClassType reg_class);
 
     void tryFreePReg(PhysRegIdPtr phys_reg);
 

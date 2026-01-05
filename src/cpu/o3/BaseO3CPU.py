@@ -200,6 +200,7 @@ class BaseO3CPU(BaseCPU):
     enable_storeSet_train = Param.Bool(True, "Training store set predictor")
 
     BankConflictCheck = Param.Bool(True, "open Bank conflict check")
+
     sbufferBankWriteAccurately = Param.Bool(False, "Sbuffer write to memory with bank conflict check")
     EnableLdMissReplay = Param.Bool(True, "Replay Cache missed load instrution from ReplayQ if True")
     EnablePipeNukeCheck = Param.Bool(True, "Replay load if Raw violation is detected in loadPipe if True")
@@ -222,7 +223,15 @@ class BaseO3CPU(BaseCPU):
     RobCompressPolicy = Param.ROBCompressPolicy('kmhv2', "Reorder Buffer Compression Policy")
     numROBEntries = Param.Unsigned(160, "Number of reorder buffer entries")
     CROB_instPerGroup = Param.Unsigned(6, "Max number of inst per group")
-    phyregReleaseWidth = Param.Unsigned(6, "Physical register dealloc width")
+    phyregReleaseWidth = Param.Unsigned(16, "Physical register dealloc width")
+    phyregReleaseWidthInt = Param.Unsigned(
+        1, "Per-cycle INT preg dealloc width (0=use phyregReleaseWidth)")
+    phyregReleaseWidthFp = Param.Unsigned(
+        1, "Per-cycle FP preg dealloc width (0=use phyregReleaseWidth)")
+    phyregReleaseWidthVec = Param.Unsigned(
+        1, "Per-cycle VEC/VecPred preg dealloc width (0=use phyregReleaseWidth)")
+    phyregReleaseWidthOther = Param.Unsigned(
+        1, "Per-cycle OTHER preg dealloc width (cc/misc/etc) (0=use phyregReleaseWidth)")
 
     smtNumFetchingThreads = Param.Unsigned(1, "SMT Number of Fetching Threads")
     smtFetchPolicy = Param.SMTFetchPolicy('RoundRobin', "SMT Fetch policy")

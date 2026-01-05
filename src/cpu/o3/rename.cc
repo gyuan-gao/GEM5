@@ -90,6 +90,41 @@ Rename::Rename(CPU *_cpu, const BaseO3CPUParams &params)
     }
 
     renameStalls.resize(renameWidth, StallReason::NoStall);
+
+    // Default per-class release widths to legacy unified releaseWidth, unless
+    // overridden by per-class parameters.
+    releaseWidthInt = params.phyregReleaseWidthInt ?
+        params.phyregReleaseWidthInt : releaseWidth;
+    releaseWidthFp = params.phyregReleaseWidthFp ?
+        params.phyregReleaseWidthFp : releaseWidth;
+    releaseWidthVec = params.phyregReleaseWidthVec ?
+        params.phyregReleaseWidthVec : releaseWidth;
+    releaseWidthOther = params.phyregReleaseWidthOther ?
+        params.phyregReleaseWidthOther : releaseWidth;
+}
+
+Rename::HistClass
+Rename::histClassFromRegClass(RegClassType reg_class)
+{
+    switch (reg_class) {
+      case IntRegClass:
+        return HistClass::Int;
+      case FloatRegClass:
+        return HistClass::Fp;
+      case VecRegClass:
+      case VecElemClass:
+      case VecPredRegClass:
+        return HistClass::Vec;
+      default:
+        return HistClass::Other;
+    }
+}
+
+std::list<Rename::RenameHistory> &
+Rename::getHistoryBuffer(ThreadID tid, RegClassType reg_class)
+{
+    const auto cls = histClassFromRegClass(reg_class);
+    return historyBuffer[tid][static_cast<size_t>(cls)];
 }
 
 std::string
@@ -330,8 +365,12 @@ bool
 Rename::isDrained() const
 {
     for (ThreadID tid = 0; tid < numThreads; tid++) {
+        bool hist_empty = true;
+        for (size_t c = 0; c < NumHistClasses; ++c) {
+            hist_empty = hist_empty && historyBuffer[tid][c].empty();
+        }
         if (instsInProgress[tid] != 0 ||
-            !historyBuffer[tid].empty() ||
+            !hist_empty ||
             !skidBuffer[tid].empty() ||
             !insts[tid].empty() ||
             (renameStatus[tid] != Idle && renameStatus[tid] != Running))
@@ -350,7 +389,9 @@ void
 Rename::drainSanityCheck() const
 {
     for (ThreadID tid = 0; tid < numThreads; tid++) {
-        assert(historyBuffer[tid].empty());
+        for (size_t c = 0; c < NumHistClasses; ++c) {
+            assert(historyBuffer[tid][c].empty());
+        }
         assert(insts[tid].empty());
         assert(skidBuffer[tid].empty());
         assert(instsInProgress[tid] == 0);
@@ -468,32 +509,44 @@ Rename::tick()
         updateStatus();
     }
 
-    if (wroteToTimeBuffer || releaseSeq < finalCommitSeq) {
+    bool pending_release = false;
+    for (ThreadID tid = 0; tid < numThreads; tid++) {
+        for (size_t c = 0; c < NumHistClasses; ++c) {
+            const auto &hb = historyBuffer[tid][c];
+            if (!hb.empty() && hb.back().instSeqNum <= committedSeq[tid]) {
+                pending_release = true;
+                break;
+            }
+        }
+        if (pending_release)
+            break;
+    }
+
+    if (wroteToTimeBuffer || pending_release) {
         DPRINTF(Activity, "Activity this cycle.\n");
         cpu->activityThisCycle();
     }
 
-    threads = activeThreads->begin();
-
-    if (releaseSeq + releaseWidth < finalCommitSeq) {
-        releaseSeq += releaseWidth;
-    } else {
-        releaseSeq = finalCommitSeq;
-    }
-
-    while (threads != end) {
-        ThreadID tid = *threads++;
-
-        removeFromHistory(releaseSeq, tid);
-
-        // If we committed this cycle then doneSeqNum will be > 0
+    // Update committed sequence numbers before releasing rename histories.
+    for (ThreadID tid = 0; tid < numThreads; tid++) {
         if (fromCommit->commitInfo[tid].doneSeqNum != 0 &&
             !fromCommit->commitInfo[tid].squash &&
             renameStatus[tid] != Squashing) {
-
-            finalCommitSeq = fromCommit->commitInfo[tid].doneSeqNum;
-            releaseSeq = historyBuffer->empty() ? 0 : historyBuffer[tid].back().instSeqNum;
+            committedSeq[tid] = fromCommit->commitInfo[tid].doneSeqNum;
         }
+    }
+
+    // Per-cycle, per-class release budgets are shared across threads.
+    ReleaseBudgets budgets;
+    budgets.intBudget = releaseWidthInt;
+    budgets.fpBudget = releaseWidthFp;
+    budgets.vecBudget = releaseWidthVec;
+    budgets.otherBudget = releaseWidthOther;
+
+    threads = activeThreads->begin();
+    while (threads != end) {
+        ThreadID tid = *threads++;
+        releaseCommittedHistory(tid, committedSeq[tid], budgets);
     }
 
     // @todo: make into updateProgress function
@@ -1102,99 +1155,92 @@ Rename::tryFreePReg(PhysRegIdPtr preg)
 void
 Rename::doSquash(const InstSeqNum &squashed_seq_num, ThreadID tid)
 {
-    auto hb_it = historyBuffer[tid].begin();
-
     // After a syscall squashes everything, the history buffer may be empty
     // but the ROB may still be squashing instructions.
     // Go through the most recent instructions, undoing the mappings
     // they did and freeing up the registers.
-    while (!historyBuffer[tid].empty() &&
-           hb_it->instSeqNum > squashed_seq_num) {
-        assert(hb_it != historyBuffer[tid].end());
+    for (size_t c = 0; c < NumHistClasses; ++c) {
+        auto &hb = historyBuffer[tid][c];
+        auto hb_it = hb.begin();
 
-        DPRINTF(Rename,
-                "[tid:%i] Removing history entry with sequence "
-                "number %i (archReg: %d, newPhysReg: %s, prevPhysReg: %s).\n",
-                tid, hb_it->instSeqNum, hb_it->archReg.index(),
-                hb_it->newPhysReg.toString(),
-                hb_it->prevPhysReg.toString());
+        while (!hb.empty() && hb_it->instSeqNum > squashed_seq_num) {
+            assert(hb_it != hb.end());
 
-        // Undo the rename mapping only if it was really a change.
-        // Special regs that are not really renamed (like misc regs
-        // and the zero reg) can be recognized because the new mapping
-        // is the same as the old one.  While it would be merely a
-        // waste of time to update the rename table, we definitely
-        // don't want to put these on the free list.
-        if (hb_it->newPhysReg != hb_it->prevPhysReg) {
-            // Tell the rename map to set the architected register to the
-            // previous physical register that it was renamed to.
-            renameMap[tid]->setEntry(hb_it->archReg, hb_it->prevPhysReg);
-            if (hb_it->newPhysReg.PhyReg() != hb_it->prevPhysReg.PhyReg()) {
-                tryFreePReg(hb_it->newPhysReg.PhyReg());
+            DPRINTF(Rename,
+                    "[tid:%i] Removing history entry with sequence "
+                    "number %i (archReg: %d, newPhysReg: %s, prevPhysReg: %s).\n",
+                    tid, hb_it->instSeqNum, hb_it->archReg.index(),
+                    hb_it->newPhysReg.toString(),
+                    hb_it->prevPhysReg.toString());
+
+            // Undo the rename mapping only if it was really a change.
+            // Special regs that are not really renamed (like misc regs
+            // and the zero reg) can be recognized because the new mapping
+            // is the same as the old one.  While it would be merely a
+            // waste of time to update the rename table, we definitely
+            // don't want to put these on the free list.
+            if (hb_it->newPhysReg != hb_it->prevPhysReg) {
+                // Tell the rename map to set the architected register to the
+                // previous physical register that it was renamed to.
+                renameMap[tid]->setEntry(hb_it->archReg, hb_it->prevPhysReg);
+                if (hb_it->newPhysReg.PhyReg() != hb_it->prevPhysReg.PhyReg()) {
+                    tryFreePReg(hb_it->newPhysReg.PhyReg());
+                }
             }
+
+            // Notify potential listeners that the register mapping needs to be
+            // removed because the instruction it was mapped to got squashed. Note
+            // that this is done before hb_it is incremented.
+            ppSquashInRename->notify(std::make_pair(hb_it->instSeqNum,
+                                                    hb_it->newPhysReg.PhyReg()));
+
+            hb.erase(hb_it++);
+            ++stats.undoneMaps;
         }
-
-        // Notify potential listeners that the register mapping needs to be
-        // removed because the instruction it was mapped to got squashed. Note
-        // that this is done before hb_it is incremented.
-        ppSquashInRename->notify(std::make_pair(hb_it->instSeqNum,
-                                                hb_it->newPhysReg.PhyReg()));
-
-        historyBuffer[tid].erase(hb_it++);
-
-        ++stats.undoneMaps;
     }
 }
 
-void
-Rename::removeFromHistory(InstSeqNum inst_seq_num, ThreadID tid)
+bool
+Rename::releaseCommittedHistory(ThreadID tid, InstSeqNum committed_seq,
+                                ReleaseBudgets &budgets)
 {
-    DPRINTF(Rename, "[tid:%i] Removing a committed instruction from the "
-            "history buffer %u (size=%i), until [sn:%llu].\n",
-            tid, tid, historyBuffer[tid].size(), inst_seq_num);
+    bool did_release = false;
 
-    auto hb_it = historyBuffer[tid].end();
+    auto releaseFrom = [&](HistClass hc, unsigned &budget) {
+        if (budget == 0)
+            return;
+        auto &hb = historyBuffer[tid][static_cast<size_t>(hc)];
+        while (budget > 0 && !hb.empty() &&
+               hb.back().instSeqNum <= committed_seq) {
+            const auto &entry = hb.back();
 
-    --hb_it;
+            DPRINTF(Rename,
+                    "[tid:%i] try to free up older rename of reg %s (%s), "
+                    "[sn:%llu].\n",
+                    tid, entry.prevPhysReg.toString(),
+                    entry.prevPhysReg.PhyReg()->className(),
+                    entry.instSeqNum);
 
-    if (historyBuffer[tid].empty()) {
-        DPRINTF(Rename, "[tid:%i] History buffer is empty.\n", tid);
-        return;
-    } else if (hb_it->instSeqNum > inst_seq_num) {
-        DPRINTF(Rename, "[tid:%i] [sn:%llu] "
-                "Old sequence number encountered. "
-                "Ensure that a syscall happened recently.\n",
-                tid,inst_seq_num);
-        return;
-    }
+            // Don't free special phys regs like misc and zero regs, which
+            // can be recognized because the new mapping is the same as
+            // the old one.
+            if (entry.newPhysReg.PhyReg() != entry.prevPhysReg.PhyReg()) {
+                tryFreePReg(entry.prevPhysReg.PhyReg());
+            }
 
-    // Commit all the renames up until (and including) the committed sequence
-    // number. Some or even all of the committed instructions may not have
-    // rename histories if they did not have destination registers that were
-    // renamed.
-    while (!historyBuffer[tid].empty() &&
-           hb_it != historyBuffer[tid].end() &&
-           hb_it->instSeqNum <= inst_seq_num) {
-
-        DPRINTF(Rename,
-                "[tid:%i] try to free up older rename of reg %s (%s), "
-                "[sn:%llu].\n",
-                tid, hb_it->prevPhysReg.toString(),
-                hb_it->prevPhysReg.PhyReg()->className(),
-                hb_it->instSeqNum);
-
-
-        // Don't free special phys regs like misc and zero regs, which
-        // can be recognized because the new mapping is the same as
-        // the old one.
-        if (hb_it->newPhysReg.PhyReg() != hb_it->prevPhysReg.PhyReg()) {
-            tryFreePReg(hb_it->prevPhysReg.PhyReg());
+            ++stats.committedMaps;
+            hb.pop_back();
+            --budget;
+            did_release = true;
         }
+    };
 
-        ++stats.committedMaps;
+    releaseFrom(HistClass::Int, budgets.intBudget);
+    releaseFrom(HistClass::Fp, budgets.fpBudget);
+    releaseFrom(HistClass::Vec, budgets.vecBudget);
+    releaseFrom(HistClass::Other, budgets.otherBudget);
 
-        historyBuffer[tid].erase(hb_it--);
-    }
+    return did_release;
 }
 
 void
@@ -1336,12 +1382,13 @@ Rename::renameDestRegs(const DynInstPtr &inst, ThreadID tid)
                                rename_result.first,
                                rename_result.second);
 
-        historyBuffer[tid].push_front(hb_entry);
+        auto &hb = getHistoryBuffer(tid, flat_dest_regid.classValue());
+        hb.push_front(hb_entry);
 
         DPRINTF(Rename, "[tid:%i] [sn:%llu] "
                 "Adding instruction to history buffer (size=%i).\n",
-                tid,(*historyBuffer[tid].begin()).instSeqNum,
-                historyBuffer[tid].size());
+                tid,(*hb.begin()).instSeqNum,
+                hb.size());
 
         // Tell the instruction to rename the appropriate destination
         // register (dest_idx) to the new physical register
@@ -1641,24 +1688,22 @@ Rename::incrFullStat(const FullSource &source)
 void
 Rename::dumpHistory()
 {
-    std::list<RenameHistory>::iterator buf_it;
-
     for (ThreadID tid = 0; tid < numThreads; tid++) {
+        for (size_t c = 0; c < NumHistClasses; ++c) {
+            auto buf_it = historyBuffer[tid][c].begin();
+            while (buf_it != historyBuffer[tid][c].end()) {
+                cprintf("Seq num: %i\nArch reg[%s]: %i New phys reg:"
+                        " %i[%s] Old phys reg: %i[%s]\n",
+                        (*buf_it).instSeqNum,
+                        (*buf_it).archReg.className(),
+                        (*buf_it).archReg.index(),
+                        (*buf_it).newPhysReg.PhyReg()->index(),
+                        (*buf_it).newPhysReg.PhyReg()->className(),
+                        (*buf_it).prevPhysReg.PhyReg()->index(),
+                        (*buf_it).prevPhysReg.PhyReg()->className());
 
-        buf_it = historyBuffer[tid].begin();
-
-        while (buf_it != historyBuffer[tid].end()) {
-            cprintf("Seq num: %i\nArch reg[%s]: %i New phys reg:"
-                    " %i[%s] Old phys reg: %i[%s]\n",
-                    (*buf_it).instSeqNum,
-                    (*buf_it).archReg.className(),
-                    (*buf_it).archReg.index(),
-                    (*buf_it).newPhysReg.PhyReg()->index(),
-                    (*buf_it).newPhysReg.PhyReg()->className(),
-                    (*buf_it).prevPhysReg.PhyReg()->index(),
-                    (*buf_it).prevPhysReg.PhyReg()->className());
-
-            buf_it++;
+                buf_it++;
+            }
         }
     }
 }
