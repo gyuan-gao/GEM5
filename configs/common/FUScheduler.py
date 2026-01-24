@@ -1,11 +1,13 @@
+from __future__ import annotations
 
-
+import json
+from dataclasses import dataclass
+from typing import Any, Dict, List, Tuple, Optional
 from m5.SimObject import SimObject
 from m5.params import *
 from m5.objects.FuncUnit import *
 from m5.objects.FuncUnitConfig import *
 from m5.objects.FuncScheduler import *
-
 #  must be consistent with issue_queue.cc
 maxTotalRFPorts = (1 << 6) - 1
 # portid, priority
@@ -372,273 +374,292 @@ class IdealScheduler(Scheduler):
 
 DefaultScheduler = KunminghuScheduler
 
-# class KMHV3DSEScheduler(Scheduler):
-#     # INT: reduce issue ports while keeping full FU coverage
-#     def __init__(self, *args, **kwargs):
-#         super().__init__(*args, **kwargs)
+# ============================================================
+# (2) scheduler_from_spec.py
+#     - Full scheduler implementation that takes a params dict
+#     - No dependency on get_param/set_param
+#     - Main program:
+#         1) calls solver -> spec_json/spec_dict
+#         2) puts spec into params
+#         3) instantiates scheduler with params
+# ============================================================
 
-#         SXQSize = kwargs.get('SXQSize', 18)
-#         VXQSize = kwargs.get('VXQSize', 18)
-#         MXQSize = kwargs.get('MXQSize', 18)
-#         LSQSize = kwargs.get('LSQSize', 18)
-        
-#         SXQEnqSize = kwargs.get('SXQEnqSize', 3)
-#         VXQEnqSize = kwargs.get('VXQEnqSize', 3)
-#         MXQEnqSize = kwargs.get('MXQEnqSize', 3)
-#         LSQEnqSize = kwargs.get('LSQEnqSize', 3)
-        
-#         SXQDeqSize = kwargs.get('SXQDeqSize', 3)
-#         VXQDeqSize = kwargs.get('VXQDeqSize', 1)
-#         MXQDeqSize = kwargs.get('MXQDeqSize', 3)
-#         LSQDeqSize = kwargs.get('LSQDeqSize', 4)
 
-#         # __SXQ_FUPool=[IntALU(), IntCvt(), IntBJU(), IntMisc()]
-        
-#         __SXQ_A=[IntALU()]
-#         __SXQ_AC=[IntALU(), IntCvt()]
-#         __SXQ_AB=[IntALU(), IntBJU()]
-#         __SXQ_ABC=[IntALU(),IntBJU(),IntCvt()]
 
-#         __SXQ_CHOICES = {
-#             'A': __SXQ_A,
-#             'AC': __SXQ_AC,
-#             'AB': __SXQ_AB,
-#             'ABC': __SXQ_ABC,
-#         }
 
-#         def __pick(choice_map, key: str, default: str):
-#             sel = kwargs.get(key, default)
-#             try:
-#                 return choice_map[sel]
-#             except KeyError:
-#                 raise ValueError(f"Invalid {key}: {sel}. Allowed={list(choice_map.keys())}")
+# ----------------------------
+# Utility functions
+# ----------------------------
 
-#         # (sxq_id, deq_port) -> FU list
-#         __SXQ_FUs = {
-#             (sxq, port): __pick(__SXQ_CHOICES, f"SXQ{sxq}{port}_FUs", "ABC")
-#             for sxq in range(3)
-#             for port in range(3)
-#         }
-        
-#         # __VXQ_FUPool=[FP_ALU(),FP_MISC(),FP_MAC(),FP_SLOW(),SIMD_Unit()]
-#         # VXQ merge float & vector instructions
-#         __VXQ_FM=[FP_ALU(),FP_MAC()]
-#         __VXQ_FMA=[FP_ALU(),FP_MAC(),SIMD_Unit()]
-#         __VXQ_ALU=[FP_ALU(),FP_SIMD_Unit()]
-#         __VXQ_SHUF=[SIMD_Unit(),FP_MISC()]
-#         __VXQ_SPEC=[FP_MISC(), FP_SLOW()]
-#         __VXQ_V=[SIMD_Unit()]
-#         __VXQ_CHOICES = {
-#             'FM': __VXQ_FM,
-#             'FMA': __VXQ_FMA,
-#             'ALU': __VXQ_ALU,
-#             'SHUF': __VXQ_SHUF,
-#             'SPEC': __VXQ_SPEC,
-#             'V': __VXQ_V,
-#         }
+def _decode_mask(mask: int, fu_pool: List[Any]) -> List[Any]:
+    mask = int(mask)
+    if mask <= 0:
+        raise ValueError(f"Invalid FU mask {mask}: must be >= 1")
+    out: List[Any] = []
+    for i in range(len(fu_pool)):
+        if (mask >> i) & 1:
+            # IMPORTANT:
+            # FuncUnit objects are SimObjects and must NOT be shared across
+            # multiple IssuePorts/IssueQues (multi-parent/orphan issues).
+            # Store constructors/classes in fu_pool and instantiate here.
+            ctor = fu_pool[i]
+            out.append(ctor() if callable(ctor) else ctor)
+    return out
 
-#         def __pick_vxq(vxq: int, port: int, default: str = 'FM'):
-#             """
-#             Prefer VXQ{vxq}{port}_FUs (e.g. VXQ00_FUs). For backward
-#             compatibility, allow VXQ{vxq}_FUs as an alias for port 0.
-#             """
-#             key = f"VXQ{vxq}{port}_FUs"
-#             legacy_key = f"VXQ{vxq}_FUs"
-#             if port == 0 and (legacy_key in kwargs) and (key not in kwargs):
-#                 key = legacy_key
-#             return __pick(__VXQ_CHOICES, key, default)
 
-#         # (vxq_id, deq_port) -> FU list
-#         __VXQ_FUs = {(vxq, port): __pick_vxq(vxq, port) for vxq in range(2) for port in range(2)}
+def _alloc_rp_linear(make_rd, make_wr,
+                     rd_start: int, wr_start: int,
+                     num_ports: int, rd_per_port: int, wr_per_port: int,
+                     rd_prio: int = 0, wr_prio: int = 0) -> Tuple[List[List[Any]], int, int]:
+    rp_lists: List[List[Any]] = []
+    rd = int(rd_start)
+    wr = int(wr_start)
+    # IntRD/IntWR/FpRD/FpWR encode port id in 4 bits -> id must be < 16.
+    # For DSE-generated schedules, total requested "logical" ports can exceed 16.
+    # We must therefore reuse physical port ids by wrapping within [0..15].
+    _MAX_ID = 16
+    for _ in range(int(num_ports)):
+        rps: List[Any] = []
+        for i in range(int(rd_per_port)):
+            rps.append(make_rd((rd + i) % _MAX_ID, rd_prio))
+        rd += int(rd_per_port)
+        for j in range(int(wr_per_port)):
+            rps.append(make_wr((wr + j) % _MAX_ID, wr_prio))
+        wr += int(wr_per_port)
+        rp_lists.append(rps)
+    return rp_lists, rd, wr
 
-#         if SXQDeqSize == 3:
-#             __SXQs = [
-#                 IssueQue(name='SXQ0', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(0, 0)],
-#                         # RD/WR(port_id, priority)
-#                         # need decision about ports
-#                         rp=[IntRD(0, 0), IntRD(1, 0), IntWR(0, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(0, 1)],
-#                         rp=[IntRD(2, 0), IntRD(3, 0), IntWR(1, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(0, 2)],
-#                         rp=[IntRD(4, 0), IntRD(5, 0), IntWR(2, 0)]
-#                     ),
-#                 ]),
-#                 IssueQue(name='SXQ1', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(1, 0)],
-#                         rp=[IntRD(6, 0), IntRD(7, 0), IntWR(3, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(1, 1)],
-#                         rp=[IntRD(8, 0), IntRD(9, 0), IntWR(4, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(1, 2)],
-#                         rp=[IntRD(10, 0), IntRD(11, 0), IntWR(5, 0)]
-#                     ),
-#                 ]),
-#                 IssueQue(name='SXQ2', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(2, 0)],
-#                         rp=[IntRD(12, 0), IntRD(13, 0), IntWR(6, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(2, 1)],
-#                         rp=[IntRD(14, 0), IntRD(15, 0), IntWR(7, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(2, 2)],
-#                         rp=[IntRD(16, 0), IntRD(17, 0), IntWR(8, 0)]
-#                     ),
-#                 ]),
-#             ]  # enable full access to regfile readport, no interleave.
-#         elif SXQDeqSize == 2:
-#             __SXQs = [
-#                 IssueQue(name='SXQ0', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(0, 0)],
-#                         rp=[IntRD(0, 0), IntRD(1, 0), IntWR(0, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(0, 1)],
-#                         rp=[IntRD(2, 0), IntRD(3, 0), IntWR(1, 0)]
-#                     ),
-#                 ]),
-#                 IssueQue(name='SXQ1', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(1, 0)],
-#                         rp=[IntRD(4, 0), IntRD(5, 0), IntWR(2, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(1, 1)],
-#                         rp=[IntRD(6, 0), IntRD(7, 0), IntWR(3, 0)]
-#                     ),
-#                 ]),
-#                 IssueQue(name='SXQ2', inports=SXQEnqSize, size=SXQSize, oports=[
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(2, 0)],
-#                         rp=[IntRD(8, 0), IntRD(9, 0), IntWR(4, 0)]
-#                     ),
-#                     IssuePort(
-#                         fu=__SXQ_FUs[(2, 1)],
-#                         rp=[IntRD(10, 0), IntRD(11, 0), IntWR(5, 0)]
-#                     ),
-#                 ]),
-#             ]
-#         else:
-#             raise ValueError(f"Invalid SXQDeqSize: {SXQDeqSize}")
 
-    
-#         if VXQDeqSize == 1:
-#             __VXQs = [
-#                 IssueQue(name='VXQ0', inports=VXQEnqSize, size=VXQSize, oports=[
-#                     IssuePort(
-#                         fu=__VXQ_FUs[(0, 0)],
-#                         rp=[FpRD(0, 0), FpRD(1, 0), FpRD(2, 0), FpWR(0, 0)]
-#                     ),
-#                 ]),
-#                 IssueQue(name='VXQ1', inports=VXQEnqSize, size=VXQSize, oports=[
-#                     IssuePort(fu=__VXQ_FUs[(1, 0)]),
-#                 ]),
-#             ]
-#         elif VXQDeqSize == 2:
-#             __VXQs = [
-#                 IssueQue(name='VXQ0', inports=VXQEnqSize, size=VXQSize, oports=[
-#                     IssuePort(fu=__VXQ_FUs[(0, 0)]),
-#                     IssuePort(fu=__VXQ_FUs[(0, 1)]),
-#                 ]),
-#                 IssueQue(name='VXQ1', inports=VXQEnqSize, size=VXQSize, oports=[
-#                     IssuePort(fu=__VXQ_FUs[(1, 0)]),
-#                     IssuePort(fu=__VXQ_FUs[(1, 1)]),
-#                 ]),
-#             ]
-#         else:
-#             raise ValueError(f"Invalid VXQDeqSize: {VXQDeqSize}")
+def _instantiate_rp_from_plan(plan_items: List[Tuple[str, int, int]]) -> List[Any]:
+    rp: List[Any] = []
+    for kind, idx, prio in plan_items:
+        kind = str(kind)
+        idx = int(idx)
+        prio = int(prio)
+        if kind == "FpRD":
+            rp.append(FpRD(idx, prio))
+        elif kind == "FpWR":
+            rp.append(FpWR(idx, prio))
+        elif kind == "IntRD":
+            rp.append(IntRD(idx, prio))
+        elif kind == "IntWR":
+            rp.append(IntWR(idx, prio))
+        else:
+            raise ValueError(f"Unknown RP kind in plan: {kind}")
+    return rp
 
-#     # __MXQ_FUPool=[IntMult(),IntDiv()]
-#     # rd/wr ports need to be tuned
-#     if MXQDeqSize == 3:
-#         __MXQs = [
-#             IssueQue(name='MXQ0', inports=MXQEnqSize, size=MXQSize, oports=[
-#                 IssuePort(fu=[IntMult(),IntDiv()]
-#                           rp=[IntRD(0, 0), IntRD(1, 0), IntWR(0, 0)]),
-#                 IssuePort(fu=[IntMult(),IntDiv()],
-#                           rp=[IntRD(2, 0), IntRD(3, 0), IntWR(1, 0)]),
-#                 IssuePort(fu=[IntMult(),IntDiv()],
-#                           rp=[IntRD(4, 0), IntRD(5, 0), IntWR(2, 0)]),
-#             ]),
-#         ]
-#     elif MXQDeqSize == 2:
-#         __MXQs = [
-#             IssueQue(name='MXQ0', inports=MXQEnqSize, size=MXQSize, oports=[
-#                 IssuePort(fu=[IntMult(),IntDiv()]
-#                           rp=[IntRD(0, 0), IntRD(1, 0), IntWR(0, 0)]),
-#                 IssuePort(fu=[IntMult(),IntDiv()],
-#                           rp=[IntRD(2, 0), IntRD(3, 0), IntWR(1, 0)]),
-#             ]),
-#         ]
-#     else:
-#         raise ValueError(f"Invalid MXQDeqSize: {MXQDeqSize}")
 
-#     # MEM: keep structure; retain two load queues as requested
+def _build_sx_queues(sol_sx: Dict, enq: int, size: int, fu_pool: List[Any]) -> List[Any]:
+    rp_pol = sol_sx.get("rp_policy", {})
+    rd = int(rp_pol.get("rd_start", 0))
+    wr = int(rp_pol.get("wr_start", 0))
+    rd_per_port = int(rp_pol.get("rd_per_port", 2))
+    wr_per_port = int(rp_pol.get("wr_per_port", 1))
 
-#     if LSQDeqSize == 4:
-#         pass
-#     elif LSQDeqSize == 3:
-#         pass
-#     elif LSQDeqSize == 2:
-#         pass
-    
-#     __LSQs = [
-#         IssueQue(name='ld0', inports=2, size=16, oports=[
-#             IssuePort(fu=[ReadPort()], rp=[IntRD(7, 0)])
-#         ]),
-#         IssueQue(name='ld1', inports=2, size=16, oports=[
-#             IssuePort(fu=[ReadPort()], rp=[IntRD(9, 0)])
-#         ]),
-#         IssueQue(name='sta0', inports=2, size=16, oports=[
-#             IssuePort(fu=[WritePort()], rp=[IntRD(6, 1)])
-#         ]),
-#         # Keep one store-data queue to preserve StoreDataPort coverage, including FP store-data read.
-#         IssueQue(name='std0', inports=2, size=16, oports=[
-#             IssuePort(fu=[StoreDataPort()], rp=[IntRD(0, 1), FpRD(12, 0)])
-#         ]),
-#     ]
+    out: List[Any] = []
+    for q in sol_sx["queues"]:
+        name = q["name"]
+        deq = int(q["deq_size"])
+        masks = q["port_fu_masks"]
+        if len(masks) != deq:
+            raise ValueError(f"{name}: deq_size={deq} but got {len(masks)} masks")
 
-#     intRegfileBanks = 2
+        rp_lists, rd, wr = _alloc_rp_linear(IntRD, IntWR, rd, wr, deq, rd_per_port, wr_per_port, 0, 0)
+        oports: List[Any] = []
+        for i in range(deq):
+            oports.append(IssuePort(fu=_decode_mask(masks[i], fu_pool), rp=rp_lists[i]))
+        out.append(IssueQue(name=name, inports=enq, size=size, oports=oports))
+    return out
 
-#     IQs = __intIQs + __memIQs + __fpIQs
 
-#     __int_bank = [i.name for i in __intIQs]
-#     __mem_bank = [i.name for i in __memIQs]
-#     __fp_bank = [i.name for i in __fpIQs]
+def _build_mx_queues(sol_mx: Dict, enq: int, size: int, fu_pool: List[Any]) -> List[Any]:
+    rp_pol = sol_mx.get("rp_policy", {})
+    rd = int(rp_pol.get("rd_start", 0))
+    wr = int(rp_pol.get("wr_start", 0))
+    rd_per_port = int(rp_pol.get("rd_per_port", 2))
+    wr_per_port = int(rp_pol.get("wr_per_port", 1))
 
-#     # Update wakeup network lists to match the new IQ names (avoid dangling references).
-#     specWakeupNetwork = [
-#         SpecWakeupChannel(
-#             srcs=__int_bank + __mem_bank + ['fpIQ0'],
-#             dsts=__int_bank + __mem_bank
-#         ),
-#         SpecWakeupChannel(
-#             srcs=__mem_bank,
-#             dsts=__fp_bank
-#         ),
-#         SpecWakeupChannel(
-#             srcs=__fp_bank,
-#             dsts=__fp_bank + ['std0']
-#         )
-#     ]
+    out: List[Any] = []
+    for q in sol_mx["queues"]:
+        name = q["name"]
+        deq = int(q["deq_size"])
+        masks = q["port_fu_masks"]
+        if len(masks) != deq:
+            raise ValueError(f"{name}: deq_size={deq} but got {len(masks)} masks")
 
-#     enableMainRdpOpt = True  # TX dynamic read port optimization
+        rp_lists, rd, wr = _alloc_rp_linear(IntRD, IntWR, rd, wr, deq, rd_per_port, wr_per_port, 0, 0)
+        oports: List[Any] = []
+        for i in range(deq):
+            oports.append(IssuePort(fu=_decode_mask(masks[i], fu_pool), rp=rp_lists[i]))
+        out.append(IssueQue(name=name, inports=enq, size=size, oports=oports))
+    return out
 
-#     def disableAllRegArb(self):
-#         print("Disable regfile arbitration")
-#         for iq in self.IQs:
-#             for port in iq.oports:
-#                 port.rp.clear()
+
+def _build_vx_queues(sol_vx: Dict, enq: int, size: int, fu_pool: List[Any]) -> List[Any]:
+    rp_pol = sol_vx.get("rp_policy", {})
+    fp_rd_start = int(rp_pol.get("fp_rd_start", 0))
+    fp_rd_per_port = int(rp_pol.get("fp_rd_per_port", 0))
+    special_plan = rp_pol.get("special_rp_plan", {})
+
+    rd = fp_rd_start
+    out: List[Any] = []
+    for q in sol_vx["queues"]:
+        name = q["name"]
+        deq = int(q["deq_size"])
+        masks = q["port_fu_masks"]
+        if len(masks) != deq:
+            raise ValueError(f"{name}: deq_size={deq} but got {len(masks)} masks")
+
+        oports: List[Any] = []
+        for i in range(deq):
+            rp: List[Any] = []
+            if name in special_plan and str(i) in special_plan[name]:
+                rp = _instantiate_rp_from_plan(special_plan[name][str(i)])
+            elif fp_rd_per_port > 0:
+                rp = [FpRD(rd + j, 0) for j in range(fp_rd_per_port)]
+                rd += fp_rd_per_port
+            oports.append(IssuePort(fu=_decode_mask(masks[i], fu_pool), rp=rp))
+        out.append(IssueQue(name=name, inports=enq, size=size, oports=oports))
+    return out
+
+
+# ----------------------------
+# Scheduler that consumes params dict (no get_param)
+# ----------------------------
+
+class KMHV3DSEScheduler(Scheduler):
+    """
+    params dict schema (minimal):
+      {
+        "SXQSize": 18, "SXQEnqSize": 3, "SXQDeqSize": 3,
+        "VXQSize": 18, "VXQEnqSize": 3, "VXQDeqSize": 1,
+        "MXQSize": 18, "MXQEnqSize": 3, "MXQDeqSize": 3,
+        "UseSolverDeq": True/False,
+        "EnforceDeqMatch": True/False,
+        "IQBindingSpec": dict or JSON string
+      }
+    """
+
+    def __init__(self, params: Dict[str, Any], **kwargs):
+        # Scheduler is a SimObject; when overriding __init__, gem5 requires
+        # calling the SimObject initializer first.
+        super().__init__(**kwargs)
+
+        def P(key: str, default: Any) -> Any:
+            return params.get(key, default)
+
+        SXQSize = int(P('SXQSize', 18))
+        VXQSize = int(P('VXQSize', 18))
+        MXQSize = int(P('MXQSize', 18))
+        LSQSize = int(P('LSQSize', 18))
+
+        SXQEnqSize = int(P('SXQEnqSize', 3))
+        VXQEnqSize = int(P('VXQEnqSize', 3))
+        MXQEnqSize = int(P('MXQEnqSize', 3))
+        LSQEnqSize = int(P('LSQEnqSize', 3))
+
+        SXQDeqSize = int(P('SXQDeqSize', 3))
+        VXQDeqSize = int(P('VXQDeqSize', 1))
+        MXQDeqSize = int(P('MXQDeqSize', 3))
+        LSQDeqSize = int(P('LSQDeqSize', 4))
+
+        use_solver_deq = bool(P("UseSolverDeq", True))
+        enforce_deq_match = bool(P("EnforceDeqMatch", False))
+
+        spec_raw = P("IQBindingSpec", None)
+        if spec_raw is None:
+            raise ValueError("params['IQBindingSpec'] is required.")
+
+        if isinstance(spec_raw, str):
+            spec = json.loads(spec_raw)
+        elif isinstance(spec_raw, dict):
+            spec = spec_raw
+        else:
+            raise TypeError(f"IQBindingSpec must be dict or JSON string, got {type(spec_raw)}")
+
+        # If parent controls deq, enforce it (spec must already contain correct mask lengths)
+        if not use_solver_deq:
+            for q in spec["SX"]["queues"]:
+                if len(q["port_fu_masks"]) != SXQDeqSize:
+                    raise ValueError(f"SX {q['name']}: masks length must == SXQDeqSize")
+                q["deq_size"] = SXQDeqSize
+            for q in spec["VX"]["queues"]:
+                if len(q["port_fu_masks"]) != VXQDeqSize:
+                    raise ValueError(f"VX {q['name']}: masks length must == VXQDeqSize")
+                q["deq_size"] = VXQDeqSize
+            for q in spec["MX"]["queues"]:
+                if len(q["port_fu_masks"]) != MXQDeqSize:
+                    raise ValueError(f"MX {q['name']}: masks length must == MXQDeqSize")
+                q["deq_size"] = MXQDeqSize
+        else:
+            # Spec controls deq; optionally require it matches parent params
+            if enforce_deq_match:
+                for q in spec["SX"]["queues"]:
+                    if int(q["deq_size"]) != SXQDeqSize:
+                        raise ValueError(f"SX {q['name']}: deq_size mismatch")
+                for q in spec["VX"]["queues"]:
+                    if int(q["deq_size"]) != VXQDeqSize:
+                        raise ValueError(f"VX {q['name']}: deq_size mismatch")
+                for q in spec["MX"]["queues"]:
+                    if int(q["deq_size"]) != MXQDeqSize:
+                        raise ValueError(f"MX {q['name']}: deq_size mismatch")
+
+        # FU pools (bit order must match solver)
+        # Use constructors/classes (NOT instances) so each IssuePort gets fresh SimObjects.
+        sx_pool = [IntALU, IntCvt, IntBJU, IntMisc]
+        mx_pool = [IntMult, IntDiv]
+        vx_pool = [FP_ALU, FP_MISC, FP_MAC, FP_SLOW, SIMD_Unit]
+
+        __SXQs = _build_sx_queues(spec["SX"], SXQEnqSize, SXQSize, sx_pool)
+        __VXQs = _build_vx_queues(spec["VX"], VXQEnqSize, VXQSize, vx_pool)
+        __MXQs = _build_mx_queues(spec["MX"], MXQEnqSize, MXQSize, mx_pool)
+
+        # LSQ fixed, as in your current design
+        __LSQs = [
+            IssueQue(name='ld0', inports=2, size=16, oports=[
+                IssuePort(fu=[ReadPort()], rp=[IntRD(7, 0)])
+            ]),
+            IssueQue(name='ld1', inports=2, size=16, oports=[
+                IssuePort(fu=[ReadPort()], rp=[IntRD(9, 0)])
+            ]),
+            IssueQue(name='sta0', inports=2, size=16, oports=[
+                IssuePort(fu=[WritePort()], rp=[IntRD(6, 1)])
+            ]),
+            IssueQue(name='std0', inports=2, size=16, oports=[
+                IssuePort(fu=[StoreDataPort()], rp=[IntRD(0, 1), FpRD(12, 0)])
+            ]),
+        ]
+
+        self.intRegfileBanks = 2
+        self.IQs = __SXQs + __VXQs + __MXQs + __LSQs
+
+        __SX_bank = [i.name for i in __SXQs]
+        __VX_bank = [i.name for i in __VXQs]
+        __MX_bank = [i.name for i in __MXQs]
+        __LS_bank = [i.name for i in __LSQs]
+
+        self.specWakeupNetwork = [
+            SpecWakeupChannel(
+                srcs=__SX_bank + __MX_bank + __LS_bank,
+                dsts=__SX_bank + __MX_bank + __LS_bank
+            ),
+            SpecWakeupChannel(
+                srcs=__VX_bank,
+                dsts=__VX_bank
+            ),
+            SpecWakeupChannel(
+                srcs=__LS_bank,
+                dsts=__VX_bank
+            )
+        ]
+
+        self.enableMainRdpOpt = True
+
+    def disableAllRegArb(self):
+        print("Disable regfile arbitration")
+        for iq in self.IQs:
+            for port in iq.oports:
+                port.rp.clear()
+
+
+
