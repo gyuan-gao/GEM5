@@ -819,7 +819,7 @@ def run_vanilla(options, root, testsys, cpu_class):
         if options.warmup_insts_no_switch != None:
             testsys.cpu[i].warmupInstCount = options.warmup_insts_no_switch
 
-    checkpoint_dir = None
+    checkpoint_dir = getattr(options, 'checkpoint_dir', None)
     root.apply_config(options.param)
     m5.instantiate(checkpoint_dir)
 

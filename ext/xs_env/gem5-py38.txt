@@ -22,4 +22,3 @@ tk=8.6.12=h1ccaba5_0
 wheel=0.41.2=py38h06a4308_0
 xz=5.4.2=h5eee18b_0
 zlib=1.2.13=h5eee18b_0
-ortools

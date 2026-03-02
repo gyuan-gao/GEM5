@@ -159,7 +159,8 @@ if __name__ == '__m5_main__':
     args = xiangshan_system_init()
 
     args.enable_difftest = False
-    args.raw_cpt = True
+    args.raw_cpt = (args.generic_rv_cpt is not None and
+                    not args.generic_rv_cpt.endswith('.gz'))
     args.no_pf = True
     assert not args.external_memory_system
 

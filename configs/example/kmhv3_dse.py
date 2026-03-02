@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 import enum
-import math
-import re
+import json
+import random
 import os
 import subprocess
 import sys
@@ -12,7 +12,7 @@ from m5.util import addToPath
 
 addToPath('../')
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 from ruby import Ruby
 from common.FSConfig import *
@@ -111,18 +111,6 @@ def solve_iq_binding_spec_external(
     return spec_json
 
 
-def _is_power_of_two(x: int) -> bool:
-    x = int(x)
-    return x > 0 and (x & (x - 1)) == 0
-
-
-def _next_power_of_two(x: int) -> int:
-    x = int(x)
-    if x <= 1:
-        return 1
-    return 1 << (x - 1).bit_length()
-
-
 class ParamType(enum.Enum):
     CPU = "CPU"
     BPred = "BPred"
@@ -145,6 +133,186 @@ class KmhV3DesignSpace:
 
     def default_config(self) -> Dict[str, Any]:
         return {p.name: p.default for p in self.params}
+
+
+def _as_int(x: Any, *, name: str) -> int:
+    try:
+        return int(x)
+    except Exception as e:
+        raise ValueError(f"{name} must be int-like, got {x!r}") from e
+
+
+def _solve_widths(
+    *,
+    allowed: Dict[str, List[Any]],
+    fixed: Dict[str, Any],
+    rng: random.Random,
+) -> Dict[str, int]:
+    fw_dom = sorted({_as_int(v, name="FetchWidth") for v in allowed.get("FetchWidth", [])})
+    dw_dom = sorted({_as_int(v, name="DecodeWidth") for v in allowed.get("DecodeWidth", [])})
+    rw_dom = sorted({_as_int(v, name="RenameWidth") for v in allowed.get("RenameWidth", [])})
+    if not fw_dom or not dw_dom or not rw_dom:
+        return {}
+
+    fw_fix = fixed.get("FetchWidth")
+    dw_fix = fixed.get("DecodeWidth")
+    rw_fix = fixed.get("RenameWidth")
+
+    feasible: List[Tuple[int, int, int]] = []
+    for fw in fw_dom:
+        if fw_fix is not None and fw != _as_int(fw_fix, name="FetchWidth"):
+            continue
+        for dw in dw_dom:
+            if dw_fix is not None and dw != _as_int(dw_fix, name="DecodeWidth"):
+                continue
+            if fw < dw:
+                continue
+            for rw in rw_dom:
+                if rw_fix is not None and rw != _as_int(rw_fix, name="RenameWidth"):
+                    continue
+                if dw < rw:
+                    continue
+                feasible.append((fw, dw, rw))
+
+    if not feasible:
+        raise ValueError("No feasible (FetchWidth, DecodeWidth, RenameWidth) satisfying FetchWidth >= DecodeWidth >= RenameWidth")
+
+    fw, dw, rw = rng.choice(feasible)
+    return {"FetchWidth": fw, "DecodeWidth": dw, "RenameWidth": rw}
+
+
+def _solve_icache_assoc_even(
+    *,
+    allowed: Dict[str, List[Any]],
+    fixed: Dict[str, Any],
+    rng: random.Random,
+) -> Dict[str, int]:
+    if "ICacheAssociativity" not in allowed:
+        return {}
+
+    if fixed.get("ICacheAssociativity") is not None:
+        assoc = _as_int(fixed["ICacheAssociativity"], name="ICacheAssociativity")
+        if assoc % 2 != 0:
+            raise ValueError(f"ICacheAssociativity must be multiple of 2, got {assoc}")
+        return {"ICacheAssociativity": assoc}
+
+    dom = sorted({_as_int(v, name="ICacheAssociativity") for v in allowed["ICacheAssociativity"]})
+    dom = [v for v in dom if v % 2 == 0]
+    if not dom:
+        raise ValueError("No feasible ICacheAssociativity values satisfying multiple-of-2 constraint")
+    return {"ICacheAssociativity": rng.choice(dom)}
+
+
+def _check_iq_binding_spec(spec: Dict[str, Any], *, enforce_deq_match: bool, fixed_deq: Dict[str, Optional[int]]) -> None:
+    m_fu = {"SX": 4, "VX": 5, "MX": 2}
+    allowed_k = {"SX": {2, 3}, "VX": {1, 2}, "MX": {2, 3}}
+
+    for cls in ("SX", "VX", "MX"):
+        if cls not in spec or not isinstance(spec[cls], dict):
+            raise ValueError(f"IQBindingSpec missing class {cls}")
+        queues = spec[cls].get("queues")
+        if not isinstance(queues, list) or len(queues) == 0:
+            raise ValueError(f"IQBindingSpec[{cls}].queues must be a non-empty list")
+
+        mask_all = (1 << m_fu[cls]) - 1
+        class_union = 0
+
+        for q in queues:
+            if not isinstance(q, dict):
+                raise ValueError(f"IQBindingSpec[{cls}].queues contains non-dict entry")
+            deq_size = _as_int(q.get("deq_size"), name=f"IQBindingSpec[{cls}].queue.deq_size")
+            if deq_size not in allowed_k[cls]:
+                raise ValueError(f"IQBindingSpec[{cls}] deq_size {deq_size} not in {sorted(allowed_k[cls])}")
+            masks = q.get("port_fu_masks")
+            if not isinstance(masks, list):
+                raise ValueError(f"IQBindingSpec[{cls}].queue.port_fu_masks must be a list")
+            if len(masks) != deq_size:
+                raise ValueError(
+                    f"IQBindingSpec[{cls}] deq_size={deq_size} but port_fu_masks has {len(masks)} entries"
+                )
+
+            seen = 0
+            for mv in masks:
+                m = _as_int(mv, name=f"IQBindingSpec[{cls}].queue.port_fu_masks[]")
+                if m < 1 or m > mask_all:
+                    raise ValueError(f"IQBindingSpec[{cls}] mask {m} out of range [1..{mask_all}]")
+                if seen & m:
+                    raise ValueError(f"IQBindingSpec[{cls}] queue has overlapping FU mask bits: {m}")
+                seen |= m
+                class_union |= m
+
+            if enforce_deq_match:
+                fixed = fixed_deq.get(cls)
+                if fixed is not None and deq_size != int(fixed):
+                    raise ValueError(f"IQBindingSpec[{cls}] deq_size={deq_size} does not match fixed {fixed}")
+
+        if class_union != mask_all:
+            raise ValueError(f"IQBindingSpec[{cls}] does not cover all FU bits (union=0x{class_union:x})")
+
+
+def checker(
+    space: KmhV3DesignSpace,
+    config: Dict[str, Any],
+    params: Optional[Dict[str, Any]] = None,
+    *,
+    allow_unknown: bool = False,
+) -> None:
+    if not isinstance(config, dict):
+        raise ValueError(f"config must be dict, got {type(config).__name__}")
+
+    allowed: Dict[str, List[Any]] = {p.name: list(p.values) for p in space.params}
+    known = set(allowed.keys()) | {"SXQDeqSize", "VXQDeqSize", "MXQDeqSize", "IQBindingSpec"}
+
+    unknown = [k for k in config.keys() if k not in known]
+    if unknown and not allow_unknown:
+        raise ValueError(f"Unknown config keys: {sorted(unknown)}")
+
+    for k, v in config.items():
+        if k in allowed:
+            if v not in allowed[k]:
+                raise ValueError(f"{k}={v!r} not in allowed values: {allowed[k]}")
+
+    if "ICacheAssociativity" in config and config["ICacheAssociativity"] is not None:
+        assoc = _as_int(config["ICacheAssociativity"], name="ICacheAssociativity")
+        if assoc % 2 != 0:
+            raise ValueError(f"ICacheAssociativity must be multiple of 2, got {assoc}")
+
+    if "FetchWidth" in config and "DecodeWidth" in config:
+        fw = _as_int(config["FetchWidth"], name="FetchWidth")
+        dw = _as_int(config["DecodeWidth"], name="DecodeWidth")
+        if not (fw >= dw):
+            raise ValueError(f"FetchWidth must be >= DecodeWidth, got {fw} and {dw}")
+
+    if "DecodeWidth" in config and "RenameWidth" in config:
+        dw = _as_int(config["DecodeWidth"], name="DecodeWidth")
+        rw = _as_int(config["RenameWidth"], name="RenameWidth")
+        if not (dw >= rw):
+            raise ValueError(f"DecodeWidth must be >= RenameWidth, got {dw} and {rw}")
+
+    spec_json = None
+    enforce_deq_match = False
+    fixed_deq = {"SX": None, "VX": None, "MX": None}
+    if params is not None:
+        if params.get("EnforceDeqMatch") is not None:
+            enforce_deq_match = bool(params.get("EnforceDeqMatch"))
+        spec_json = params.get("IQBindingSpec")
+        fixed_deq = {
+            "SX": params.get("SXQDeqSize"),
+            "VX": params.get("VXQDeqSize"),
+            "MX": params.get("MXQDeqSize"),
+        }
+    if spec_json is None:
+        spec_json = config.get("IQBindingSpec")
+    if spec_json is not None:
+        if not isinstance(spec_json, str):
+            raise ValueError(f"IQBindingSpec must be JSON string, got {type(spec_json).__name__}")
+        try:
+            spec = json.loads(spec_json)
+        except Exception as e:
+            raise ValueError("IQBindingSpec is not valid JSON") from e
+        if not isinstance(spec, dict):
+            raise ValueError("IQBindingSpec JSON must be an object")
+        _check_iq_binding_spec(spec, enforce_deq_match=enforce_deq_match, fixed_deq=fixed_deq)
 
 def build_design_space() -> KmhV3DesignSpace:
     return KmhV3DesignSpace(
@@ -264,13 +432,13 @@ def build_design_space() -> KmhV3DesignSpace:
                 # PREGs,value range need tuning
             ParameterRange(
                 name="IntPregsNumber",
-                values=[x for x in range(160, 641, 40)],
-                default=224,
+                values=sorted(set([x for x in range(160, 641, 20)])),
+                default=240,
             ),
             ParameterRange(
                 name="FloatPregsNumber",
-                values=[x for x in range(96, 321, 40)],
-                default=256,
+                values=sorted(set([x for x in range(96, 321, 20)])),
+                default=96,
             ),
             ParameterRange(
                 name="VectorPregsNumber",
@@ -405,80 +573,83 @@ def build_design_space() -> KmhV3DesignSpace:
     )
 
 
-def bind_gem5(system: Any, config: Dict[str, Any], *, strict: bool = False) -> None:
+def gen_random(
+    space: KmhV3DesignSpace,
+    *,
+    seed: Optional[int] = None,
+    base_config: Optional[Dict[str, Any]] = None,
+    randomize_unconstrained: bool = True,
+    respect_base_config: bool = True,
+    use_solver_deq: bool = True,
+    enforce_deq_match: bool = False,
+    time_limit_s: float = 5.0,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    rng = random.Random(seed)
 
-    # Parent-space parameters (you can replace with argparse/yaml)
+    allowed: Dict[str, List[Any]] = {p.name: list(p.values) for p in space.params}
+    fixed_keys = set(base_config.keys()) if (base_config is not None and respect_base_config) else set()
+    constrained_keys = {"FetchWidth", "DecodeWidth", "RenameWidth", "ICacheAssociativity"}
+
+    if base_config is None:
+        config: Dict[str, Any] = space.default_config()
+    else:
+        config = dict(base_config)
+
+    if randomize_unconstrained:
+        for p in space.params:
+            if p.name in constrained_keys:
+                continue
+            if p.name in fixed_keys:
+                continue
+            config[p.name] = rng.choice(p.values)
+
+        fixed_view = dict(config) if not fixed_keys else {k: config.get(k) for k in fixed_keys}
+        config.update(_solve_widths(allowed=allowed, fixed=fixed_view, rng=rng))
+        config.update(_solve_icache_assoc_even(allowed=allowed, fixed=fixed_view, rng=rng))
+
     params: Dict[str, Any] = {}
 
-    # SXQ parameters
-    if "SXQSize" in config:
-        params["SXQSize"] = config["SXQSize"]
-    else:
-        params["SXQSize"] = 18
-    if "SXQEnqSize" in config:
-        params["SXQEnqSize"] = config["SXQEnqSize"]
-    else:
-        params["SXQEnqSize"] = 3
-    if "SXQDeqSize" in config:
-        params["SXQDeqSize"] = config["SXQDeqSize"]
-    else:
-        params["SXQDeqSize"] = 3
+    params["SXQSize"] = config.get("SXQSize", 18)
+    params["SXQEnqSize"] = config.get("SXQEnqSize", 3)
+    params["SXQDeqSize"] = config.get("SXQDeqSize", 3)
 
-    # VXQ parameters
-    if "VXQSize" in config:
-        params["VXQSize"] = config["VXQSize"]
-    else:
-        params["VXQSize"] = 18
-    if "VXQEnqSize" in config:
-        params["VXQEnqSize"] = config["VXQEnqSize"]
-    else:
-        params["VXQEnqSize"] = 3
-    if "VXQDeqSize" in config:
-        params["VXQDeqSize"] = config["VXQDeqSize"]
-    else:
-        params["VXQDeqSize"] = 1
+    params["VXQSize"] = config.get("VXQSize", 18)
+    params["VXQEnqSize"] = config.get("VXQEnqSize", 3)
+    params["VXQDeqSize"] = config.get("VXQDeqSize", 1)
 
-    # MXQ parameters
-    if "MXQSize" in config:
-        params["MXQSize"] = config["MXQSize"]
-    else:
-        params["MXQSize"] = 18
-    if "MXQEnqSize" in config:
-        params["MXQEnqSize"] = config["MXQEnqSize"]
-    else:
-        params["MXQEnqSize"] = 3
-    if "MXQDeqSize" in config:
-        params["MXQDeqSize"] = config["MXQDeqSize"]
-    else:
-        params["MXQDeqSize"] = 3
+    params["MXQSize"] = config.get("MXQSize", 18)
+    params["MXQEnqSize"] = config.get("MXQEnqSize", 3)
+    params["MXQDeqSize"] = config.get("MXQDeqSize", 3)
 
-    params["UseSolverDeq"] = True          # True: deq sizes come from spec; False: fixed by SXQDeqSize etc.
-    params["EnforceDeqMatch"] = False      # if UseSolverDeq=True, set True to require spec matches parent sizes
+    params["UseSolverDeq"] = bool(use_solver_deq)
+    params["EnforceDeqMatch"] = bool(enforce_deq_match)
 
-    # Solve subspace and embed spec into params
-    # IMPORTANT: run OR-Tools solver in a separate process to avoid protobuf conflicts in gem5.
+    solver_seed = rng.randint(0, (1 << 31) - 1) if seed is not None else None
     if params["UseSolverDeq"]:
         spec_json = solve_iq_binding_spec_external(
             use_solver_deq_sx=True,
             use_solver_deq_vx=True,
             use_solver_deq_mx=True,
-            random_seed=123,
-            time_limit_s=5.0,
+            random_seed=solver_seed,
+            time_limit_s=time_limit_s,
         )
     else:
         spec_json = solve_iq_binding_spec_external(
             use_solver_deq_sx=False,
-            fixed_sx_deq=params["SXQDeqSize"],
+            fixed_sx_deq=int(params["SXQDeqSize"]),
             use_solver_deq_vx=False,
-            fixed_vx_deq=params["VXQDeqSize"],
+            fixed_vx_deq=int(params["VXQDeqSize"]),
             use_solver_deq_mx=False,
-            fixed_mx_deq=params["MXQDeqSize"],
-            random_seed=123,
-            time_limit_s=5.0,
+            fixed_mx_deq=int(params["MXQDeqSize"]),
+            random_seed=solver_seed,
+            time_limit_s=time_limit_s,
         )
 
-    # Pass JSON; scheduler supports JSON string.
     params["IQBindingSpec"] = spec_json
+    return config, params
+
+
+def bind_gem5(system: Any, config: Dict[str, Any], params: Dict[str, Any]) -> None:
 
 
     for cpu in getattr(system, "cpu", []):
@@ -493,15 +664,7 @@ def bind_gem5(system: Any, config: Dict[str, Any], *, strict: bool = False) -> N
             cpu.mmu.dtb.size = config["TLBSize"]
 
         if "ICacheAssociativity" in config:
-            assoc = int(config["ICacheAssociativity"])
-            if not _is_power_of_two(assoc):
-                fixed = _next_power_of_two(assoc)
-                msg = f"ICacheAssociativity={assoc} is not power-of-two; using {fixed} to avoid gem5 warnings."
-                if strict:
-                    raise ValueError(msg)
-                print("warn:", msg)
-                assoc = fixed
-            cpu.icache.assoc = assoc
+            cpu.icache.assoc = int(config["ICacheAssociativity"])
 
         if "ICacheSize" in config:
             cpu.icache.size = config["ICacheSize"]
@@ -596,15 +759,7 @@ def bind_gem5(system: Any, config: Dict[str, Any], *, strict: bool = False) -> N
         if "L1DcacheSize" in config:
             cpu.dcache.size = config["L1DcacheSize"]
         if "DCacheAssociativity" in config:
-            assoc = int(config["DCacheAssociativity"])
-            if not _is_power_of_two(assoc):
-                fixed = _next_power_of_two(assoc)
-                msg = f"DCacheAssociativity={assoc} is not power-of-two; using {fixed} to avoid gem5 warnings."
-                if strict:
-                    raise ValueError(msg)
-                print("warn:", msg)
-                assoc = fixed
-            cpu.dcache.assoc = assoc
+            cpu.dcache.assoc = int(config["DCacheAssociativity"])
 
         if "CommitedStoreBufferSize(RSC)" in config:
             raise NotImplementedError("CommitedStoreBufferSize(RSC) is not implemented")
@@ -675,7 +830,17 @@ if __name__ == "__m5_main__":
 
     test_sys = build_xiangshan_system(args)
 
-    bind_gem5(system=test_sys, config=space.default_config())
+    config, params = gen_random(
+        space,
+        seed=3454,
+        base_config=space.default_config(),
+        randomize_unconstrained=False,
+        use_solver_deq=True,
+        enforce_deq_match=False,
+        time_limit_s=5.0,
+    )
+    checker(space, config, params)
+    bind_gem5(system=test_sys, config=config, params=params)
 
     root = Root(full_system=True, system=test_sys)
 

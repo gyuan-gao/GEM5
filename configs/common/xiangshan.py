@@ -125,12 +125,13 @@ def config_xiangshan_inputs(args: argparse.Namespace, sys):
             else:
                 fatal("Plz set $GCBH_RESTORER when running RVH checkpoints")
         else:
-            if "GCB_RESTORER" in os.environ:
+            # 新版本切片/裸机程序可不使用 GCPT 恢复器，环境变量留空即可跳过
+            if "GCB_RESTORER" in os.environ and os.environ["GCB_RESTORER"].strip():
                 gcpt_restorer = os.environ["GCB_RESTORER"]
                 print("Obtained gcpt_restorer from GCB_RESTORER: ", gcpt_restorer)
             else:
-                fatal("Plz set $GCB_RESTORER or pass it through --gcpt-restorer"
-                      " when running non-RVV checkpoints")
+                gcpt_restorer = None
+                print("No GCPT restorer (new slice/bare-metal may skip it; set GCB_RESTORER empty to skip)")
     else:
         print("Obtained gcpt_restorer from args.gcpt_restorer: ", args.gcpt_restorer)
         gcpt_restorer = args.gcpt_restorer
@@ -163,7 +164,7 @@ def config_xiangshan_inputs(args: argparse.Namespace, sys):
             sys.map_to_raw_cpt = True
             sys.workload.raw_bootloader = True
         else:
-            sys.gcpt_restorer_file = gcpt_restorer
+            sys.gcpt_restorer_file = gcpt_restorer if gcpt_restorer else ""
     # enable h checkpoint
     if args.enable_h_gcpt:
         sys.enable_h_gcpt = True

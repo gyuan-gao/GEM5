@@ -1,0 +1,53 @@
+/bin/bash: /opt/miniconda3/envs/py38/lib/libtinfo.so.6: no version information available (required by /bin/bash)
+=== 运行模式: cpt ===
+=== 运行 checkpoint .gz: /gem5/workloads/523.xalancbmk_r_10G/80/_80_0.007519_memory_.gz (m5out 保存到 /gem5/m5out_saved/523.xalancbmk_r_10G_80__80_0.007519_memory_) ===
+Global frequency set at 1000000000000 ticks per second
+build/RISCV/arch/riscv/bare_metal/fs_workload.cc:60: info: No bootload provided, because using XS GCPT, reset to 0x80000000
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:256] into equal-sized buckets. Rounding up.
+build/RISCV/cpu/o3/issue_queue.cc:896: warn: No config for opClass: IprAccess
+build/RISCV/cpu/o3/issue_queue.cc:896: warn: No config for opClass: InstPrefetch
+build/RISCV/cpu/base.cc:244: warn: Difftest is disabled
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/cpu/o3/cpu.cc:238: warn: Setting isa ptr of cpu to 0x5643cae50b40
+build/RISCV/base/remote_gdb.cc:381: warn: Sockets disabled, not accepting gdb connections
+build/RISCV/mem/physical.cc:509: warn: Unserializing physical memory from file /gem5/workloads/523.xalancbmk_r_10G/80/_80_0.007519_memory_.gz
+build/RISCV/sim/system.cc:561: info: Restored from Xiangshan RISC-V Checkpoint
+gem5 Simulator System.  https://www.gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version [DEVELOP-FOR-22.1]
+gem5 compiled Jan  6 2026 13:36:31
+gem5 started Feb 10 2026 10:14:29
+gem5 executing on 8e4864f16c9c, pid 2670
+command line: ./build/RISCV/gem5.opt -d /gem5/m5out_saved/523.xalancbmk_r_10G_80__80_0.007519_memory_ /gem5/configs/example/kmhv3.py --generic-rv-cpt=/gem5/workloads/523.xalancbmk_r_10G/80/_80_0.007519_memory_.gz
+
+info: Standard input is not a terminal, disabling listeners.
+[<m5.params.AddrRange object at 0x7f7cba527220>]
+No GCPT restorer (new slice/bare-metal may skip it; set GCB_RESTORER empty to skip)
+Simulating single core without RVV, demanding GCPT restorer size of 0x700.
+loop predictor and loop buffer not supported for DecoupledBPUWithBTB
+Attach 1 decoders to thread with addr: <orphan System>.cpu.decoder
+Create threads for test sys cpu (XiangshanCore)
+Finish memory system configuration
+Disable regfile arbitration
+No switch cpu_class provided
+Registering probe listeners for BaseO3CPU system.cpu
+Registering inner cache accessors for L2CacheWrapper system.l2_wrappers
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher.bop_large
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher.bop_small
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher.cdp
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher.cmc
+Registering probe listeners for Prefetcher system.l2_wrappers.prefetcher.despacito_stream
+Registering inner cache accessor for L2CacheSlice system.l2_wrappers.slices0
+Registering inner cache accessor for L2CacheSlice system.l2_wrappers.slices1
+Registering inner cache accessor for L2CacheSlice system.l2_wrappers.slices2
+Registering inner cache accessor for L2CacheSlice system.l2_wrappers.slices3
+**** REAL SIMULATION ****
+warn: No dot file generated. Please install pydot to generate the dot file and pdf.
+build/RISCV/sim/simulate.cc:194: info: Entering event queue @ 0.  Starting simulation...
+Will trigger stat dump and reset
+build/RISCV/sim/simulate.cc:194: info: Entering event queue @ 8612558154.  Starting simulation...
+Exiting @ tick 17222361066 because a thread reached the max instruction count
+=== 所有步骤完成 ===
